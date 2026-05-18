@@ -35,6 +35,7 @@ export function FieldsPage() {
     try {
       setLoading(true);
       const response = await apiClient.get('/fields');
+
       setFields(response.data.data); // data is rows, maybe there is meta
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'Gagal memuat data lahan');
@@ -60,6 +61,10 @@ export function FieldsPage() {
     f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (f.description && f.description.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+
+
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

@@ -84,16 +84,22 @@ export const fieldsService = {
       ]);
     }
 
+    rows.forEach((row) => {
+      row.mapVisualUrl = `http://127.0.0.1:8001/webodm/display?project_name=${userId}&task_name=${row.name}&asset_type=orthophoto.tif`;
+    });
+
     return { rows, meta: buildPaginationMeta({ page, limit, offset }, total) };
   },
 
-  async getById(fieldId: string) {
+  async getById(fieldId: string, userId: string) {
     const [field] = await db
       .select()
       .from(fieldsTable)
       .where(and(eq(fieldsTable.id, fieldId), eq(fieldsTable.isActive, true)))
       .limit(1);
     if (!field) throw new AppError(404, 'FIELD_NOT_FOUND', 'Field tidak ditemukan');
+
+    field.mapVisualUrl = `http://127.0.0.1:8001/webodm/display?project_name=${userId}&task_name=${field.name}&asset_type=orthophoto.tif`;
     return field;
   },
 

@@ -61,7 +61,7 @@ masterDataRouter.get(
   requireAuth,
   requireFieldAccess('viewer'),
   h(async (req, res) => {
-    const field = await fieldsService.getById(req.params['fieldId']!);
+    const field = await fieldsService.getById(req.params['fieldId']!, req.user!.id);
     res.json(successResponse(field));
   }),
 );
