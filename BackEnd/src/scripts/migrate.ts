@@ -1,46 +1,33 @@
 /**
- * db:migrate — Jalankan schema.sql ke database baru
+ * db:migrate — Menjalankan migrasi Drizzle dari database/migrations
  * Usage: npm run db:migrate
  */
 import 'dotenv/config';
 import { Pool } from 'pg';
-import fs from 'fs';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import path from 'path';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+async function runMigrate() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is missing in .env');
+  }
 
-async function migrate() {
-  const client = await pool.connect();
-  console.log('\n🚀 Smart AWD — Database Migration\n');
+  console.log('\n🚀 Smart AWD — Database Migration (Drizzle)\n');
+
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 1, // Batasi 1 koneksi khusus untuk migrasi
+  });
+  
+  const db = drizzle(pool);
 
   try {
-    // Cek apakah schema sudah ada
-    const { rows } = await client.query(
-      `SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'mst'`
-    );
-
-    if (rows.length > 0) {
-      console.log('⚠️  Schema "mst" sudah ada.');
-      console.log('   Gunakan npm run db:reset untuk reset total.\n');
-      return;
-    }
-
-    console.log('📄 Membaca schema.sql...');
-    const schemaPath = path.join(__dirname, '../../database/schema.sql');
-    const sql = fs.readFileSync(schemaPath, 'utf-8');
-
-    console.log('⚙️  Menjalankan migration...');
-    await client.query(sql);
-
-    // Catat migrasi
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS public.schema_migrations (
-        version     TEXT PRIMARY KEY,
-        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-      INSERT INTO public.schema_migrations (version) VALUES ('001_initial_schema')
-      ON CONFLICT DO NOTHING;
-    `);
+    console.log('📄 Membaca folder database/migrations...');
+    const migrationsFolder = path.join(__dirname, '../../database/migrations');
+    
+    console.log('⚙️  Menjalankan migrasi secara incremental...');
+    await migrate(db, { migrationsFolder });
 
     console.log('✅ Migration berhasil!\n');
     console.log('   Langkah selanjutnya:');
@@ -51,9 +38,8 @@ async function migrate() {
     console.error('\n❌ Migration gagal:', err.message, '\n');
     process.exit(1);
   } finally {
-    client.release();
     await pool.end();
   }
 }
 
-migrate();
+runMigrate();

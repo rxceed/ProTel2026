@@ -5,10 +5,9 @@
  */
 import 'dotenv/config';
 import { Pool } from 'pg';
-import fs from 'fs';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import path from 'path';
-
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function reset() {
   if (process.env.NODE_ENV === 'production') {
@@ -16,7 +15,18 @@ async function reset() {
     process.exit(1);
   }
 
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is missing in .env');
+  }
+
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 1,
+  });
+  
   const client = await pool.connect();
+  const db = drizzle(pool);
+
   console.log('\n⚠️  Smart AWD — Database RESET (development only)\n');
 
   try {
@@ -26,26 +36,17 @@ async function reset() {
       DROP SCHEMA IF EXISTS trx  CASCADE;
       DROP SCHEMA IF EXISTS sys  CASCADE;
       DROP SCHEMA IF EXISTS logs CASCADE;
+      DROP SCHEMA IF EXISTS drizzle CASCADE;
       DROP TABLE  IF EXISTS public.schema_migrations;
     `);
 
-    console.log('📄 Membaca schema.sql...');
-    const schemaPath = path.join(__dirname, '../../database/schema.sql');
-    const sql = fs.readFileSync(schemaPath, 'utf-8');
+    console.log('📄 Membaca folder database/migrations...');
+    const migrationsFolder = path.join(__dirname, '../../database/migrations');
 
-    console.log('⚙️  Menjalankan ulang schema...');
-    await client.query(sql);
+    console.log('⚙️  Menjalankan migrasi Drizzle dari awal...');
+    await migrate(db, { migrationsFolder });
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS public.schema_migrations (
-        version     TEXT PRIMARY KEY,
-        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-      INSERT INTO public.schema_migrations (version) VALUES ('001_initial_schema')
-      ON CONFLICT DO NOTHING;
-    `);
-
-    console.log('✅ Reset berhasil! Database bersih dengan schema fresh.\n');
+    console.log('✅ Reset & Migration berhasil! Database bersih dengan schema fresh.\n');
     console.log('   Langkah selanjutnya:');
     console.log('   npm run db:seed && ADMIN_PASSWORD=xxx npm run seed:admin\n');
 

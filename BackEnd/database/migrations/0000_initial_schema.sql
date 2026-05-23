@@ -26,7 +26,6 @@
 -- ---------------------------------------------------------------------------
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- ---------------------------------------------------------------------------
@@ -689,14 +688,8 @@ COMMENT ON TABLE trx.telemetry_records IS
 COMMENT ON COLUMN trx.telemetry_records.water_level_cm IS
   'Level air terkalibrasi dalam cm. Negatif = di bawah permukaan tanah (AWD). Positif = tergenang.';
 
-SELECT create_hypertable('trx.telemetry_records', 'event_timestamp',
-  chunk_time_interval => INTERVAL '1 month', if_not_exists => TRUE);
-ALTER TABLE trx.telemetry_records SET (
-  timescaledb.compress,
-  timescaledb.compress_orderby   = 'event_timestamp DESC',
-  timescaledb.compress_segmentby = 'device_id'
-);
-SELECT add_compression_policy('trx.telemetry_records', INTERVAL '7 days');
+-- TimescaleDB hypertable (REMOVED FOR SUPABASE COMPATIBILITY)
+-- SELECT create_hypertable('trx.telemetry_records', 'event_timestamp', ...);
 
 CREATE INDEX idx_telemetry_records_device_time
   ON trx.telemetry_records(device_id, event_timestamp DESC);

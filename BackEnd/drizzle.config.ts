@@ -9,13 +9,12 @@ if (!process.env.DATABASE_URL) {
 
 export default defineConfig({
   schema: './src/db/schema/index.ts',
-  out: './drizzle/migrations',
+  out: './database/migrations',
   dialect: 'postgresql',
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
-  // Drizzle-kit hanya inspect schema publik; skema mst/trx/sys/logs dibuat via schema.sql
-  // Gunakan drizzle-kit untuk generate tipe dan query builder saja
+  // Drizzle-kit menghasilkan file .sql ke database/migrations
   verbose: true,
   strict: true,
 });

@@ -7,7 +7,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://reactjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+PostGIS+TimescaleDB-4169E1?logo=postgresql&logoColor=white)](https://postgresql.org)
+[![Supabase](https://img.shields.io/badge/Supabase-Database-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://python.org)
 
 </div>
@@ -99,12 +99,12 @@
 └──────────┬─────────────────────────┬─────────────────────┘
            │                         │
 ┌──────────▼──────────┐   ┌──────────▼─────────────────────┐
-│  PostgreSQL 16       │   │   Python Model Service          │
-│  + PostGIS           │   │   FastAPI + TiTiler             │
-│  + TimescaleDB       │   │   (Model — port 8000)           │
-│  (4 schema: mst/trx/ │   │                                 │
-│   sys/logs, 41 tbl)  │   │  Decision Engine · GDAL/Rasterio│
-└─────────────────────┘   └─────────────────────────────────┘
+│    Supabase Cloud   │   │   Python Model Service         │
+│  (PostgreSQL 16     │   │   FastAPI + TiTiler            │
+│   + PostGIS)        │   │   (Model — port 8000)          │
+│                     │   │                                │
+│                     │   │  Decision Engine · GDAL        │
+└─────────────────────┘   └────────────────────────────────┘
 ```
 
 ---
@@ -115,11 +115,11 @@
 |---|---|
 | **Frontend** | React 18, Vite, TypeScript, Tailwind CSS, OpenLayers, Recharts |
 | **Backend** | Node.js 20, Express, TypeScript, Drizzle ORM, Zod, Pino |
-| **Database** | PostgreSQL 16 + PostGIS + TimescaleDB |
+| **Database** | Supabase (PostgreSQL 16 + PostGIS) |
 | **Model/AI** | Python 3.11, FastAPI, GDAL, Rasterio, TiTiler |
 | **Storage** | Cloudflare R2 (S3-compatible) |
 | **Auth** | JWT (Access + Refresh Token) |
-| **Deployment** | Docker + Docker Compose |
+| **Deployment** | Serverless DB (Supabase) + Local Node.js / React |
 
 ---
 
@@ -128,7 +128,8 @@
 ### Prasyarat
 
 - [Node.js 20+](https://nodejs.org)
-- [Docker Desktop](https://docker.com)
+- Akun [Supabase](https://supabase.com) (Untuk Cloud Database)
+- Akun Cloudflare R2 (Untuk Storage Peta)
 - [Python 3.11+](https://python.org)
 
 ### 1. Clone
@@ -138,35 +139,44 @@ git clone <repository-url>
 cd ProTel/src
 ```
 
-### 2. Jalankan Database via Docker
+### 2. Setup Supabase (Database)
+Proyek ini sekarang 100% menggunakan arsitektur *Serverless DB* sehingga Anda **tidak perlu menginstal Docker Lokal**.
+1. Buat project baru di [Supabase](https://supabase.com).
+2. Dapatkan *Connection String* (URI) PostgreSQL dari Supabase (Cari di bagian *Project Settings -> Database*).
 
-```bash
-# Di root direktori (ada docker-compose.yml)
-docker-compose up -d
-
-# Tunggu ~10 detik hingga TimescaleDB siap
-docker-compose ps
-```
-
-### 3. Setup Backend (sekali jalan)
+### 3. Setup Backend (Sekali Jalan)
 
 ```bash
 cd BackEnd
 npm install
 cp .env.example .env
-# Edit .env → isi DATABASE_URL, JWT_SECRET
+```
+
+Buka file `.env` dan masukkan konfigurasi:
+```env
+# URL dari Supabase Anda
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-ID].supabase.co:5432/postgres
+
+# Kredensial Cloudflare R2
+R2_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+R2_ACCESS_KEY_ID=YOUR_R2_KEY
+R2_SECRET_ACCESS_KEY=YOUR_R2_SECRET
+R2_BUCKET_NAME=awd-orthomosaic
+
+# Bebas isi string acak
+JWT_SECRET=super_secret_jwt_key_12345
 ```
 
 ```bash
-# Setup database: schema + seed reference data + dummy dev data
+# Setup database: Migrasi schema Drizzle + seed reference data + dummy dev data
 npm run db:setup:dev
 
-# Buat user admin
+# Buat user admin pertama
 ADMIN_PASSWORD=RahasiaKuat123! npm run seed:admin
 ```
 
 ```bash
-# Jalankan server
+# Jalankan server API (Port 3000)
 npm run dev
 ```
 
@@ -201,27 +211,29 @@ cp .env.example .env
 Isi minimal di `.env`:
 
 ```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smartawd_db
-JWT_SECRET=<output dari: openssl rand -hex 32>
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-ID].supabase.co:5432/postgres
+JWT_SECRET=<bebas_minimal_32_karakter>
 ```
 
 #### Database Scripts
 
 | Command | Fungsi |
 |---|---|
-| `npm run db:migrate` | Buat schema dari nol (schema.sql → 41 tabel) |
+| `npm run db:generate` | Drizzle-kit: Membuat file migrasi baru di `database/migrations` |
+| `npm run db:migrate` | Drizzle migrator: Menjalankan file `.sql` yang belum tereksekusi |
 | `npm run db:seed` | Seed data referensi wajib (idempotent) |
 | `npm run db:seed:dev` | Seed dummy data development |
 | `npm run db:setup` | `migrate` + `seed` (untuk production) |
 | `npm run db:setup:dev` | `migrate` + `seed` + `seed:dev` (untuk development) |
-| `npm run db:reset` | ⚠️ DEV ONLY: Drop semua & recreate |
+| `npm run db:reset` | ⚠️ DEV ONLY: Drop semua tabel dan reset ulang migrasi dari 0 |
 | `npm run seed:admin` | Buat user `system_admin` pertama |
-| `npm run db:studio` | Buka Drizzle Studio (GUI DB) |
 
-#### Workflow Database (Developer Baru)
+#### Workflow Tambah Kolom/Tabel (Developer Baru)
 
 ```
-database baru  →  npm run db:setup:dev  →  npm run seed:admin  →  npm run dev
+1. Edit src/db/schema/*.ts
+2. npm run db:generate
+3. npm run db:migrate
 ```
 
 ### Frontend
