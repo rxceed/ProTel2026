@@ -14,6 +14,8 @@ import ImageStatic from 'ol/source/ImageStatic';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { apiClient, gisProcClient } from '@/api/client';
+import axios from 'axios';
+import { getCachedMapImageUrl } from '@/lib/mapCache';
 import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, TrendingUp, GitMerge, ArrowRight } from 'lucide-react';
 
 interface Field {
@@ -215,6 +217,76 @@ export function MapPage() {
     fetchFields();
   }, []);
 
+  // Fetch and save map visual headers to localStorage when mapVisualUrl changes
+  useEffect(() => {
+    const field = fields.find(f => f.id === selectedFieldId);
+    if (!field || !field.mapVisualUrl) return;
+
+    const getHeaderValue = (headers: any, targetKey: string) => {
+      if (!headers) return undefined;
+      if (typeof headers.get === 'function') {
+        const val = headers.get(targetKey);
+        if (val !== undefined && val !== null) return val;
+      }
+      const lowerTarget = targetKey.toLowerCase();
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === lowerTarget) {
+          return headers[key];
+        }
+      }
+      return undefined;
+    };
+
+    const saveHeaders = (headers: any, fieldName: string) => {
+      if (!headers) {
+        console.warn("[MonitoringMap] No headers provided to saveHeaders");
+        return;
+      }
+      console.log("[MonitoringMap] saveHeaders received headers:", headers);
+      const targetHeaders = [
+        'x-bounds',
+        'x-crs',
+        'x-height',
+        'x-original-height',
+        'x-original-width',
+        'x-transform',
+        'x-width'
+      ];
+      
+      const savedData: Record<string, string> = { fieldName };
+      
+      targetHeaders.forEach(header => {
+        const val = getHeaderValue(headers, header);
+        console.log(`[MonitoringMap] Header key: ${header}, found value: ${val}`);
+        if (val !== undefined && val !== null) {
+          savedData[header] = String(val);
+          localStorage.setItem(`${fieldName}_${header}`, String(val));
+        }
+      });
+      
+      if (Object.keys(savedData).length > 1) {
+        console.log("[MonitoringMap] Saving map headers to localStorage for field:", fieldName, savedData);
+        localStorage.setItem(`map_headers_${fieldName}`, JSON.stringify(savedData));
+        localStorage.setItem(fieldName, JSON.stringify(savedData));
+      } else {
+        console.warn("[MonitoringMap] No target headers found in response headers. Not saving to localStorage.");
+      }
+    };
+
+    const fetchHeaders = async (url: string, fieldName: string) => {
+      console.log("[MonitoringMap] Requesting map URL:", url, "fieldName:", fieldName);
+      try {
+        const res = await axios.get(url);
+        console.log("[MonitoringMap] Request succeeded. Status:", res.status, "Headers:", res.headers);
+        saveHeaders(res.headers, fieldName);
+      } catch (err) {
+        console.error("[MonitoringMap] Request failed:", err);
+      }
+    };
+
+    fetchHeaders(field.mapVisualUrl, field.name);
+  }, [selectedFieldId, fields]);
+
   // Fetch rule profiles (global, fetched once)
   useEffect(() => {
     const fetchRuleProfiles = async () => {
@@ -410,8 +482,10 @@ export function MapPage() {
               'EPSG:3857'
             );
             
+            const imageUrl = await getCachedMapImageUrl(field.mapVisualUrl);
+            
             imageLayer.current.setSource(new ImageStatic({
-              url: field.mapVisualUrl,
+              url: imageUrl,
               imageExtent: extent
             }));
             

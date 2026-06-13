@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { apiClient } from '@/api/client';
 import { videoOpsApi, VideoEntry, ParsedVideoEntry, JobLogEntry } from '@/api/gisProc';
 import axios from 'axios';
+import { getCachedMapImageUrl } from '@/lib/mapCache';
 
 interface WebodmSseProgress {
   status: string;
@@ -75,6 +76,17 @@ export function MapVisualManager({
   // Check if map visual returns 404
   const [mapNotFound, setMapNotFound] = useState(false);
   const [checkingMap, setCheckingMap] = useState(false);
+  const [cachedUrl, setCachedUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (initialVisualUrl) {
+      getCachedMapImageUrl(initialVisualUrl).then(url => {
+        setCachedUrl(url);
+      });
+    } else {
+      setCachedUrl('');
+    }
+  }, [initialVisualUrl]);
 
   useEffect(() => {
     if (!initialVisualUrl) {
@@ -82,26 +94,71 @@ export function MapVisualManager({
       return;
     }
 
+    const getHeaderValue = (headers: any, targetKey: string) => {
+      if (!headers) return undefined;
+      if (typeof headers.get === 'function') {
+        const val = headers.get(targetKey);
+        if (val !== undefined && val !== null) return val;
+      }
+      const lowerTarget = targetKey.toLowerCase();
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === lowerTarget) {
+          return headers[key];
+        }
+      }
+      return undefined;
+    };
+
+    const saveHeaders = (headers: any) => {
+      if (!headers) {
+        console.warn("[MapVisualManager] No headers provided to saveHeaders");
+        return;
+      }
+      console.log("[MapVisualManager] saveHeaders received headers:", headers);
+      const targetHeaders = [
+        'x-bounds',
+        'x-crs',
+        'x-height',
+        'x-original-height',
+        'x-original-width',
+        'x-transform',
+        'x-width'
+      ];
+      
+      const savedData: Record<string, string> = { fieldName };
+      
+      targetHeaders.forEach(header => {
+        const val = getHeaderValue(headers, header);
+        console.log(`[MapVisualManager] Header key: ${header}, found value: ${val}`);
+        if (val !== undefined && val !== null) {
+          savedData[header] = String(val);
+          localStorage.setItem(`${fieldName}_${header}`, String(val));
+        }
+      });
+      
+      if (Object.keys(savedData).length > 1) {
+        console.log("[MapVisualManager] Saving map headers to localStorage for field:", fieldName, savedData);
+        localStorage.setItem(`map_headers_${fieldName}`, JSON.stringify(savedData));
+        localStorage.setItem(fieldName, JSON.stringify(savedData));
+      } else {
+        console.warn("[MapVisualManager] No target headers found in response headers. Not saving to localStorage.");
+      }
+    };
+
     const checkMapUrl = async () => {
       setCheckingMap(true);
+      console.log("[MapVisualManager] Requesting map URL:", initialVisualUrl);
       try {
-        await axios.head(initialVisualUrl);
+        const res = await axios.get(initialVisualUrl);
+        console.log("[MapVisualManager] Request succeeded. Status:", res.status, "Headers:", res.headers);
         setMapNotFound(false);
+        saveHeaders(res.headers);
       } catch (err: any) {
+        console.error("[MapVisualManager] Request failed:", err);
         if (err.response?.status === 404) {
           setMapNotFound(true);
         } else {
-          // If HEAD fails (e.g. CORS), try GET request
-          try {
-            await axios.get(initialVisualUrl);
-            setMapNotFound(false);
-          } catch (getErr: any) {
-            if (getErr.response?.status === 404) {
-              setMapNotFound(true);
-            } else {
-              setMapNotFound(false);
-            }
-          }
+          setMapNotFound(false);
         }
       } finally {
         setCheckingMap(false);
@@ -109,7 +166,7 @@ export function MapVisualManager({
     };
 
     checkMapUrl();
-  }, [initialVisualUrl]);
+  }, [initialVisualUrl, fieldName]);
 
   // Default select video based on initialAssignedFileName
   const [hasDefaultSelected, setHasDefaultSelected] = useState(false);
@@ -753,7 +810,7 @@ export function MapVisualManager({
         ) : (
           <div className="relative aspect-video rounded-lg overflow-hidden border bg-background group">
             <img 
-              src={initialVisualUrl} 
+              src={cachedUrl || initialVisualUrl} 
               alt="Map Visual" 
               className="w-full h-full object-cover"
               onError={() => setMapNotFound(true)}

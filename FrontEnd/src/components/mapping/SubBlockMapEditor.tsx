@@ -14,6 +14,7 @@ import ImageLayer from 'ol/layer/Image';
 import ImageStatic from 'ol/source/ImageStatic';
 import { Button } from '@/components/ui/button';
 import { X, Save, Trash2, MousePointer2, BoxSelect } from 'lucide-react';
+import { getCachedMapImageUrl } from '@/lib/mapCache';
 
 interface SubBlockMapEditorProps {
   field: {
@@ -36,85 +37,105 @@ export function SubBlockMapEditor({ field, existingPolygon, onSave, onClose }: S
   useEffect(() => {
     if (!mapRef.current) return;
 
-    if (existingPolygon) {
-      try {
-        const geom = typeof existingPolygon === 'string' 
-          ? JSON.parse(existingPolygon) 
-          : existingPolygon;
-          
-        const geojsonFormat = new GeoJSON();
-        const feature = geojsonFormat.readFeatures(
-          {
-            type: 'Feature',
-            geometry: geom,
-            properties: {},
-          },
-          {
-            dataProjection: 'EPSG:4326',
-            featureProjection: 'EPSG:3857',
-          }
-        );
-        vectorSource.current.clear();
-        vectorSource.current.addFeatures(Array.isArray(feature) ? feature : [feature]);
-      } catch (e) {
-        console.error("Failed to parse existing polygon in editor", e);
+    let active = true;
+    let initialMap: Map | null = null;
+
+    const initMap = async () => {
+      if (existingPolygon) {
+        try {
+          const geom = typeof existingPolygon === 'string' 
+            ? JSON.parse(existingPolygon) 
+            : existingPolygon;
+            
+          const geojsonFormat = new GeoJSON();
+          const feature = geojsonFormat.readFeatures(
+            {
+              type: 'Feature',
+              geometry: geom,
+              properties: {},
+            },
+            {
+              dataProjection: 'EPSG:4326',
+              featureProjection: 'EPSG:3857',
+            }
+          );
+          vectorSource.current.clear();
+          vectorSource.current.addFeatures(Array.isArray(feature) ? feature : [feature]);
+        } catch (e) {
+          console.error("Failed to parse existing polygon in editor", e);
+        }
       }
-    }
-    if (!mapRef.current) return;
+      if (!mapRef.current) return;
 
-    // Base Layers
-    const layers: any[] = [];
-    if (!field.mapVisualUrl) {
-      layers.push(new TileLayer({ source: new OSM() }));
-    }
+      let imageUrl: string | null = null;
+      if (field.mapVisualUrl) {
+        imageUrl = await getCachedMapImageUrl(field.mapVisualUrl);
+      }
 
-    // Image Layer
-    if (field.mapVisualUrl) {
-      const bounds = field.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
-      const extent = transformExtent(
-        [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
-        'EPSG:4326',
-        'EPSG:3857'
-      );
-      layers.push(new ImageLayer({
-        source: new ImageStatic({
-          url: field.mapVisualUrl,
-          imageExtent: extent
-        })
-      }));
-    }
+      if (!active) return;
 
-    // Vector Layer for drawing
-    layers.push(new VectorLayer({
-      source: vectorSource.current,
-      style: new Style({
-        fill: new Fill({ color: 'rgba(34, 197, 94, 0.3)' }),
-        stroke: new Stroke({ color: '#16a34a', width: 3 })
-      })
-    }));
+      // Base Layers
+      const layers: any[] = [];
+      if (!imageUrl) {
+        layers.push(new TileLayer({ source: new OSM() }));
+      }
 
-    const initialMap = new Map({
-      target: mapRef.current,
-      layers,
-      view: new View({
-        center: fromLonLat([106.8456, -6.2088]),
-        zoom: 18
-      })
-    });
-
-    // Zoom to visual if exists
-    if (field.mapVisualUrl) {
+      // Image Layer
+      if (imageUrl) {
         const bounds = field.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
         const extent = transformExtent(
-            [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
-            'EPSG:4326',
-            'EPSG:3857'
+          [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
+          'EPSG:4326',
+          'EPSG:3857'
         );
-        initialMap.getView().fit(extent, { padding: [50, 50, 50, 50] });
-    }
+        layers.push(new ImageLayer({
+          source: new ImageStatic({
+            url: imageUrl,
+            imageExtent: extent
+          })
+        }));
+      }
 
-    setMap(initialMap);
-    return () => initialMap.setTarget(undefined);
+      // Vector Layer for drawing
+      layers.push(new VectorLayer({
+        source: vectorSource.current,
+        style: new Style({
+          fill: new Fill({ color: 'rgba(34, 197, 94, 0.3)' }),
+          stroke: new Stroke({ color: '#16a34a', width: 3 })
+        })
+      }));
+
+      initialMap = new Map({
+        target: mapRef.current,
+        layers,
+        view: new View({
+          center: fromLonLat([106.8456, -6.2088]),
+          zoom: 18
+        })
+      });
+
+      // Zoom to visual if exists
+      if (imageUrl) {
+          const bounds = field.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
+          const extent = transformExtent(
+              [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
+              'EPSG:4326',
+              'EPSG:3857'
+          );
+          initialMap.getView().fit(extent, { padding: [50, 50, 50, 50] });
+      }
+
+      setMap(initialMap);
+    };
+
+    initMap();
+
+    return () => {
+      active = false;
+      if (initialMap) {
+        initialMap.setTarget(undefined);
+      }
+    };
   }, [field]);
 
   const toggleDrawing = () => {
