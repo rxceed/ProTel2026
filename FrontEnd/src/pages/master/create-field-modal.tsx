@@ -59,7 +59,8 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
     try {
       const payload = {
         ...formData,
-        area_hectares: formData.area_hectares === '' ? undefined : formData.area_hectares
+        area_hectares: formData.area_hectares === '' ? undefined : formData.area_hectares,
+        ...(videoFile ? { assigned_file_name: videoFile.name } : {})
       };
       
       if (initialData?.id) {

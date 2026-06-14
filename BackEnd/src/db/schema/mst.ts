@@ -70,6 +70,7 @@ export const fields = mst.table('fields', {
   notes:                text('notes'),
   mapVisualUrl:         text('map_visual_url'),
   mapBounds:            jsonb('map_bounds'),
+  assignedFileName:     text('assigned_file_name'),
   createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

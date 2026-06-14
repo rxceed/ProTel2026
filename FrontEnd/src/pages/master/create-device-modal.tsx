@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { apiClient } from '@/api/client';
+import { apiClient, gisProcClient } from '@/api/client';
 
 interface DeviceFormData {
   device_code: string;
@@ -49,7 +49,11 @@ export function CreateDeviceModal({ isOpen, fieldId, initialData, onClose, onSuc
       if (initialData?.id) {
         await apiClient.patch(`/devices/${initialData.id}`, formData);
       } else {
-        await apiClient.post(`/fields/${fieldId}/devices`, formData);
+        const response = await apiClient.post(`/fields/${fieldId}/devices`, formData);
+        const topic = response.data?.data?.topic;
+        if (topic) {
+          await gisProcClient.post('/api/mqtt/subscribe', { topic });
+        }
       }
       onSuccess();
       onClose();

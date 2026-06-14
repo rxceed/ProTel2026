@@ -40,6 +40,7 @@ export const CreateFieldSchema = z.object({
   operator_count_default: z.coerce.number().int().min(1).max(50).default(1),
   decision_cycle_mode:  z.enum(['normal', 'siaga']).default('normal'),
   notes:                z.string().max(2000).optional(),
+  assigned_file_name:   z.string().max(500).optional(),
 });
 
 export const UpdateFieldSchema = CreateFieldSchema.partial();

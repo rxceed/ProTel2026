@@ -112,6 +112,7 @@ export const fieldsService = {
         decisionCycleMode:      input.decision_cycle_mode,
         notes:                  input.notes,
         mapVisualUrl:           `${GISPROC_API_BASE_URI}/webodm/display?project_name=${createdByUserId}&task_name=${input.name}&asset_type=orthophoto.tif`,
+        assignedFileName:       input.assigned_file_name,
       })
       .returning();
 
@@ -138,6 +139,7 @@ export const fieldsService = {
         ...(input.operator_count_default !== undefined && { operatorCountDefault: input.operator_count_default }),
         ...(input.decision_cycle_mode   !== undefined && { decisionCycleMode: input.decision_cycle_mode }),
         ...(input.notes                 !== undefined && { notes: input.notes }),
+        ...(input.assigned_file_name    !== undefined && { assignedFileName: input.assigned_file_name }),
         updatedAt: new Date(),
       })
       .where(eq(fieldsTable.id, fieldId))

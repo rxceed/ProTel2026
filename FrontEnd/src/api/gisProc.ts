@@ -49,6 +49,39 @@ interface GetParsedVideosResponse {
   images: ParsedVideoEntry[];
 }
 
+export interface WebODMUploadRequest {
+  owner_id: string;
+  filename: string;
+  project_name: string;
+  task_name: string;
+}
+
+interface WebODMUploadResponse {
+  status: string;
+  message: string;
+  job_id: string;
+}
+
+export interface JobLogArgs {
+  owner_id: string;
+  filename: string;
+  project_name: string;
+  odm_task_name: string;
+  options: unknown;
+}
+
+export interface JobLogEntry {
+  jobId: string;
+  task: string;
+  startedAt: string;
+  jobArgs: JobLogArgs;
+}
+
+interface GetJobLogsResponse {
+  status: string;
+  logs: JobLogEntry[];
+}
+
 export const videoOpsApi = {
   uploadVideo: (ownerId: string, file: File) => {
     const formData = new FormData();
@@ -74,5 +107,13 @@ export const videoOpsApi = {
     return gisProcClient.get<GetParsedVideosResponse>('/api/video-ops/parsed', {
       params: { owner_id: ownerId, filename },
     });
+  },
+
+  uploadToWebODM: (body: WebODMUploadRequest) => {
+    return gisProcClient.post<WebODMUploadResponse>('/api/video-ops/webodm', body);
+  },
+
+  getJobLogsByTask: (task: string) => {
+    return gisProcClient.get<GetJobLogsResponse>(`/api/job-logs/task/${task}`);
   },
 };

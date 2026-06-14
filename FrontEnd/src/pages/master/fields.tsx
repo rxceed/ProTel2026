@@ -18,6 +18,7 @@ interface Field {
   isActive: boolean;
   mapVisualUrl: string | null;
   mapBounds: number[][] | null;
+  assignedFileName?: string | null;
   createdAt: string;
 }
 
@@ -202,8 +203,10 @@ export function FieldsPage() {
                           <td colSpan={6} className="px-6 py-4 border-y">
                             <MapVisualManager 
                               fieldId={field.id}
+                              fieldName={field.name}
                               initialVisualUrl={field.mapVisualUrl || undefined}
                               initialBounds={field.mapBounds || undefined}
+                              initialAssignedFileName={field.assignedFileName || undefined}
                               onSuccess={() => {
                                 fetchFields();
                               }}
