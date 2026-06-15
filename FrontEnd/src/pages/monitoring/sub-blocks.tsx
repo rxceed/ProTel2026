@@ -12,6 +12,12 @@ interface Field {
   name: string;
 }
 
+interface DeviceInfo {
+  id: string;
+  deviceCode: string;
+  deviceType: string;
+}
+
 interface SubBlock {
   id: string;
   fieldId: string;
@@ -21,6 +27,7 @@ interface SubBlock {
   soilType: string | null;
   isActive: boolean;
   polygonGeom?: any;
+  devices?: DeviceInfo[];
 }
 
 export function SubBlocksPage() {
@@ -176,6 +183,7 @@ export function SubBlocksPage() {
                     <th className="px-6 py-3 font-medium">Kode</th>
                     <th className="px-6 py-3 font-medium">Elevasi</th>
                     <th className="px-6 py-3 font-medium">Tipe Tanah</th>
+                    <th className="px-6 py-3 font-medium">Device Terpasang</th>
                     <th className="px-6 py-3 font-medium text-center">Status</th>
                     <th className="px-6 py-3 font-medium text-right">Aksi</th>
                   </tr>
@@ -198,6 +206,24 @@ export function SubBlocksPage() {
                       <td className="px-6 py-4 code font-mono text-xs">{sb.code || '-'}</td>
                       <td className="px-6 py-4">{sb.elevationM ? `${sb.elevationM} m` : '-'}</td>
                       <td className="px-6 py-4 capitalize">{sb.soilType || '-'}</td>
+                      <td className="px-6 py-4">
+                        {sb.devices && sb.devices.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {sb.devices.map((d) => (
+                              <Badge 
+                                key={d.id} 
+                                variant="outline" 
+                                className="text-[10px] font-mono bg-blue-500/10 text-blue-600 border-blue-500/20 py-0.5 px-1.5"
+                                title={d.deviceType.replace('_', ' ').toUpperCase()}
+                              >
+                                {d.deviceCode}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">-</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-center">
                         <Badge variant={sb.isActive ? "default" : "secondary"}>
                           {sb.isActive ? 'Aktif' : 'Non-aktif'}

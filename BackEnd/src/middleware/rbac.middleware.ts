@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { userFields } from '@/db/schema/mst';
+import { userFields, subBlocks, devices } from '@/db/schema/mst';
 import { AppError } from '@/middleware/error.middleware';
 import type { FieldRole, SystemRole } from '@/shared/types';
 
@@ -39,7 +39,40 @@ export function requireFieldAccess(minRole: FieldRole = 'viewer') {
         return;
       }
 
-      const fieldId = req.params['fieldId'] ?? req.params['id'];
+      let fieldId = req.params['fieldId'] ?? req.body?.field_id ?? req.body?.fieldId;
+
+      if (!fieldId) {
+        const id = req.params['id'];
+        if (id) {
+          const url = req.originalUrl;
+          if (url.includes('/sub-blocks/')) {
+            const [sb] = await db
+              .select({ fieldId: subBlocks.fieldId })
+              .from(subBlocks)
+              .where(eq(subBlocks.id, id))
+              .limit(1);
+            if (!sb) {
+              next(new AppError(404, 'SUB_BLOCK_NOT_FOUND', 'Petak tidak ditemukan'));
+              return;
+            }
+            fieldId = sb.fieldId;
+          } else if (url.includes('/devices/')) {
+            const [dev] = await db
+              .select({ fieldId: devices.fieldId })
+              .from(devices)
+              .where(eq(devices.id, id))
+              .limit(1);
+            if (!dev) {
+              next(new AppError(404, 'DEVICE_NOT_FOUND', 'Perangkat tidak ditemukan'));
+              return;
+            }
+            fieldId = dev.fieldId;
+          } else {
+            fieldId = id;
+          }
+        }
+      }
+
       if (!fieldId) {
         next(new AppError(400, 'FIELD_ID_REQUIRED', 'Field ID tidak ditemukan di request'));
         return;

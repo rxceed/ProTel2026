@@ -12,6 +12,7 @@ import {
   cropCycles as cropCyclesTable,
   irrigationRuleProfiles as ruleProfilesTable,
 } from '@/db/schema/mst';
+import { telemetryRecords as telemetryRecordsTable } from '@/db/schema/trx';
 import { AppError } from '@/middleware/error.middleware';
 import { parsePagination, buildPaginationMeta } from '@/shared/utils/pagination.util';
 import type {
@@ -200,19 +201,87 @@ function parseSubBlockNumerics(sb: RawSubBlock) {
 
 export const subBlocksService = {
   async listByField(fieldId: string) {
-    const rows = await db.select()
+    const rows = await db.select({
+      id: subBlocksTable.id,
+      fieldId: subBlocksTable.fieldId,
+      name: subBlocksTable.name,
+      code: subBlocksTable.code,
+      polygonGeom: sql<string>`ST_AsGeoJSON(${subBlocksTable.polygonGeom})`,
+      areaM2: subBlocksTable.areaM2,
+      centroid: sql<string | null>`ST_AsGeoJSON(${subBlocksTable.centroid})`,
+      elevationM: subBlocksTable.elevationM,
+      soilType: subBlocksTable.soilType,
+      displayOrder: subBlocksTable.displayOrder,
+      isActive: subBlocksTable.isActive,
+      notes: subBlocksTable.notes,
+      createdAt: subBlocksTable.createdAt,
+      updatedAt: subBlocksTable.updatedAt,
+    })
       .from(subBlocksTable)
       .where(and(eq(subBlocksTable.fieldId, fieldId), eq(subBlocksTable.isActive, true)))
       .orderBy(subBlocksTable.displayOrder, subBlocksTable.name);
-    return rows.map(parseSubBlockNumerics);
+
+    const assignments = await db.select({
+      subBlockId: deviceAssignmentsTable.subBlockId,
+      deviceId: devicesTable.id,
+      deviceCode: devicesTable.deviceCode,
+      deviceType: devicesTable.deviceType,
+      notes: devicesTable.notes,
+    })
+      .from(deviceAssignmentsTable)
+      .innerJoin(devicesTable, eq(deviceAssignmentsTable.deviceId, devicesTable.id))
+      .where(and(
+        eq(deviceAssignmentsTable.fieldId, fieldId),
+        sql`${deviceAssignmentsTable.unassignedAt} IS NULL`
+      ));
+
+    const parsedRows = rows.map(parseSubBlockNumerics);
+    return parsedRows.map(row => ({
+      ...row,
+      devices: assignments
+        .filter(a => a.subBlockId === row.id)
+        .map(a => ({ id: a.deviceId, deviceCode: a.deviceCode, deviceType: a.deviceType, notes: a.notes })),
+    }));
   },
 
   async getById(subBlockId: string) {
-    const [sb] = await db.select().from(subBlocksTable)
+    const [sb] = await db.select({
+      id: subBlocksTable.id,
+      fieldId: subBlocksTable.fieldId,
+      name: subBlocksTable.name,
+      code: subBlocksTable.code,
+      polygonGeom: sql<string>`ST_AsGeoJSON(${subBlocksTable.polygonGeom})`,
+      areaM2: subBlocksTable.areaM2,
+      centroid: sql<string | null>`ST_AsGeoJSON(${subBlocksTable.centroid})`,
+      elevationM: subBlocksTable.elevationM,
+      soilType: subBlocksTable.soilType,
+      displayOrder: subBlocksTable.displayOrder,
+      isActive: subBlocksTable.isActive,
+      notes: subBlocksTable.notes,
+      createdAt: subBlocksTable.createdAt,
+      updatedAt: subBlocksTable.updatedAt,
+    }).from(subBlocksTable)
       .where(and(eq(subBlocksTable.id, subBlockId), eq(subBlocksTable.isActive, true)))
       .limit(1);
     if (!sb) throw new AppError(404, 'SUB_BLOCK_NOT_FOUND', 'Sub-block tidak ditemukan');
-    return parseSubBlockNumerics(sb);
+
+    const assignments = await db.select({
+      deviceId: devicesTable.id,
+      deviceCode: devicesTable.deviceCode,
+      deviceType: devicesTable.deviceType,
+      notes: devicesTable.notes,
+    })
+      .from(deviceAssignmentsTable)
+      .innerJoin(devicesTable, eq(deviceAssignmentsTable.deviceId, devicesTable.id))
+      .where(and(
+        eq(deviceAssignmentsTable.subBlockId, subBlockId),
+        sql`${deviceAssignmentsTable.unassignedAt} IS NULL`
+      ));
+
+    return {
+      ...parseSubBlockNumerics(sb),
+      devices: assignments.map(a => ({ id: a.deviceId, deviceCode: a.deviceCode, deviceType: a.deviceType, notes: a.notes })),
+    };
   },
 
   async create(fieldId: string, input: CreateSubBlockInput) {
@@ -289,7 +358,29 @@ export const devicesService = {
   async listAll(query: Record<string, unknown>) {
     const { page, limit, offset } = parsePagination(query);
     const [rows, [{ value: total }]] = await Promise.all([
-      db.select().from(devicesTable)
+      db.select({
+        id: devicesTable.id,
+        deviceCode: devicesTable.deviceCode,
+        deviceType: devicesTable.deviceType,
+        connectionType: devicesTable.connectionType,
+        hardwareModel: devicesTable.hardwareModel,
+        serialNumber: devicesTable.serialNumber,
+        firmwareVersion: devicesTable.firmwareVersion,
+        fieldId: devicesTable.fieldId,
+        subBlockId: devicesTable.subBlockId,
+        subBlockName: subBlocksTable.name,
+        status: devicesTable.status,
+        batteryLevelPct: devicesTable.batteryLevelPct,
+        batteryUpdatedAt: devicesTable.batteryUpdatedAt,
+        installedAt: devicesTable.installedAt,
+        lastSeenAt: devicesTable.lastSeenAt,
+        notes: devicesTable.notes,
+        topic: devicesTable.topic,
+        createdAt: devicesTable.createdAt,
+        updatedAt: devicesTable.updatedAt,
+      })
+        .from(devicesTable)
+        .leftJoin(subBlocksTable, eq(devicesTable.subBlockId, subBlocksTable.id))
         .orderBy(devicesTable.deviceCode)
         .limit(limit).offset(offset),
       db.select({ value: count() }).from(devicesTable),
@@ -298,13 +389,56 @@ export const devicesService = {
   },
 
   async listByField(fieldId: string) {
-    return db.select().from(devicesTable)
+    return db.select({
+      id: devicesTable.id,
+      deviceCode: devicesTable.deviceCode,
+      deviceType: devicesTable.deviceType,
+      connectionType: devicesTable.connectionType,
+      hardwareModel: devicesTable.hardwareModel,
+      serialNumber: devicesTable.serialNumber,
+      firmwareVersion: devicesTable.firmwareVersion,
+      fieldId: devicesTable.fieldId,
+      subBlockId: devicesTable.subBlockId,
+      subBlockName: subBlocksTable.name,
+      status: devicesTable.status,
+      batteryLevelPct: devicesTable.batteryLevelPct,
+      batteryUpdatedAt: devicesTable.batteryUpdatedAt,
+      installedAt: devicesTable.installedAt,
+      lastSeenAt: devicesTable.lastSeenAt,
+      notes: devicesTable.notes,
+      topic: devicesTable.topic,
+      createdAt: devicesTable.createdAt,
+      updatedAt: devicesTable.updatedAt,
+    })
+      .from(devicesTable)
+      .leftJoin(subBlocksTable, eq(devicesTable.subBlockId, subBlocksTable.id))
       .where(eq(devicesTable.fieldId, fieldId))
       .orderBy(devicesTable.deviceCode);
   },
 
   async getById(deviceId: string) {
-    const [dev] = await db.select().from(devicesTable)
+    const [dev] = await db.select({
+      id: devicesTable.id,
+      deviceCode: devicesTable.deviceCode,
+      deviceType: devicesTable.deviceType,
+      connectionType: devicesTable.connectionType,
+      hardwareModel: devicesTable.hardwareModel,
+      serialNumber: devicesTable.serialNumber,
+      firmwareVersion: devicesTable.firmwareVersion,
+      fieldId: devicesTable.fieldId,
+      subBlockId: devicesTable.subBlockId,
+      subBlockName: subBlocksTable.name,
+      status: devicesTable.status,
+      batteryLevelPct: devicesTable.batteryLevelPct,
+      batteryUpdatedAt: devicesTable.batteryUpdatedAt,
+      installedAt: devicesTable.installedAt,
+      lastSeenAt: devicesTable.lastSeenAt,
+      notes: devicesTable.notes,
+      topic: devicesTable.topic,
+      createdAt: devicesTable.createdAt,
+      updatedAt: devicesTable.updatedAt,
+    }).from(devicesTable)
+      .leftJoin(subBlocksTable, eq(devicesTable.subBlockId, subBlocksTable.id))
       .where(eq(devicesTable.id, deviceId)).limit(1);
     if (!dev) throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device tidak ditemukan');
     return dev;
@@ -408,6 +542,10 @@ export const devicesService = {
   },
 
   async delete(deviceId: string) {
+    // Hapus records di tabel-tabel dependent terlebih dahulu agar tidak melanggar FK constraints
+    await db.delete(telemetryRecordsTable).where(eq(telemetryRecordsTable.deviceId, deviceId));
+    await db.delete(sensorCalibrationsTable).where(eq(sensorCalibrationsTable.deviceId, deviceId));
+    await db.delete(deviceAssignmentsTable).where(eq(deviceAssignmentsTable.deviceId, deviceId));
     await db.delete(devicesTable).where(eq(devicesTable.id, deviceId));
   },
 };

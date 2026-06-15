@@ -1,6 +1,7 @@
+import { eq } from 'drizzle-orm';
 import { testConnection, db } from './src/db/client';
 import { subBlocksService } from './src/modules/master-data/master-data.service';
-import { fields } from './src/db/schema/mst';
+import { fields, subBlocks as subBlocksTable } from './src/db/schema/mst';
 
 async function test() {
   await testConnection();
@@ -25,7 +26,19 @@ async function test() {
         }
     };
     const res = await subBlocksService.create(fieldId, payload as any);
-    console.log('Success:', res);
+    console.log('Inserted ID:', res.id);
+    
+    console.log('Deleting sub-block:', res.id);
+    await subBlocksService.delete(res.id);
+    
+    const list = await subBlocksService.listByField(fieldId);
+    const foundInList = list.some(sb => sb.id === res.id);
+    console.log('Is still found in listByField:', foundInList);
+    
+    // Check direct query from DB to see if it persists
+    const direct = await db.select().from(fields).limit(1); // just a placeholder
+    const [dbRow] = await db.select().from(subBlocksTable).where(eq(subBlocksTable.id, res.id));
+    console.log('Row in database after delete:', dbRow);
   } catch(e: any) {
      console.log('ERROR:', e);
   }
