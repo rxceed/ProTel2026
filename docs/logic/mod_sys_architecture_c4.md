@@ -13,13 +13,12 @@ graph TD
     BMKG(["⛈️ API Cuaca BMKG"])
 
     %% Sistem Utama
-    subgraph KLASTER ["KLASTER SISTEM SMART AWD"]
+    subgraph KLASTER [KLASTER SISTEM SMART AWD]
         
         FE["🖥️ FrontEnd Web (React/OpenLayers)"]
-        
         BE["⚙️ BackEnd Server (Node.js/Express)"]
         
-        subgraph Python_Cluster ["🧠 Python Microservices"]
+        subgraph Python_Cluster [Python Microservices]
             DSS["🤖 Decision Engine (FastAPI)"]
             Titiler["🗺️ Titiler COG Server"]
             GIS["📐 GIS Processing (FastAPI)"]
@@ -28,7 +27,7 @@ graph TD
         
         WebODM["🏗️ WebODM (Docker Cluster)"]
         
-        subgraph Database_Cluster ["🗄️ Database Polyglot"]
+        subgraph Database_Cluster [Database Polyglot]
             Postgres[("Relational & PostGIS")]
             Timescale[("TimescaleDB (Hypertable)")]
             Redis[("Redis Memory Cache")]
@@ -39,29 +38,29 @@ graph TD
     end
 
     %% Hubungan dan Aliran
-    Operator -->|Interaksi UI| FE
-    Drone -->|Upload Foto (.jpg)| WebODM
-    SensorIoT -->|Publish JSON| MQTT
+    Operator -->|"Interaksi UI"| FE
+    Drone -->|"Upload Foto JPG"| WebODM
+    SensorIoT -->|"Publish JSON"| MQTT
     
     %% Aliran Backend
-    MQTT -->|Subscribe/Ingest| BE
-    BMKG -->|Fetch Weather| BE
-    BE -->|Read/Write Master & Spatial| Postgres
-    BE -->|Batch Insert Sensor Data| Timescale
+    MQTT -->|"Subscribe Ingest"| BE
+    BMKG -->|"Fetch Weather"| BE
+    BE -->|"Read Write Master & Spatial"| Postgres
+    BE -->|"Batch Insert Sensor Data"| Timescale
     
     %% Aliran Visual & Drone
-    WebODM -.->|Konversi TIF to COG| Cloudflare
-    Cloudflare -.->|Byte Range Read| Titiler
-    Titiler -->|Serve XYZ Map Tiles| FE
-    BE -->|Serve API (Auth, Field Data)| FE
+    WebODM -.->|"Konversi TIF to COG"| Cloudflare
+    Cloudflare -.->|"Byte Range Read"| Titiler
+    Titiler -->|"Serve XYZ Map Tiles"| FE
+    BE -->|"Serve API Auth Field Data"| FE
     
     %% Aliran Algoritma
-    BE <-->|Evaluate Req/Res| DSS
-    BE -->|Post Centroid Graph| GIS
-    GIS -->|Enqueue Task| Redis
-    Redis -->|Dequeue & Compute| ARQ
-    ARQ -->|Result| Redis
-    Redis -->|Poll Result| GIS
+    BE <-->|"Evaluate Req Res"| DSS
+    BE -->|"Post Centroid Graph"| GIS
+    GIS -->|"Enqueue Task"| Redis
+    Redis -->|"Dequeue Compute"| ARQ
+    ARQ -->|"Result"| Redis
+    Redis -->|"Poll Result"| GIS
 ```
 
 ## 3. Penjelasan Interaksi
