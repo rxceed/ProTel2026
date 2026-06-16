@@ -6,7 +6,7 @@ Berpusat pada file `MapVisualManager.tsx`. Penggunaan OpenLayers membedakan visu
 ## 2. Diagram Tumpukan Lapisan Peta (*Map Layers Architecture*)
 ```mermaid
 graph TD
-    subgraph UI PETA VISUAL (OpenLayers Canvas)
+    subgraph UI ["UI PETA VISUAL (OpenLayers Canvas)"]
     
         L3["3️⃣ Vector Layer (Dynamic UI)"]
         L2["2️⃣ XYZ Tile Layer (Drone TIF)"]

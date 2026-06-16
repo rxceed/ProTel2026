@@ -7,13 +7,13 @@ Proyek Smart AWD dipecah menjadi beberapa *Microservices* yang memiliki tugas sp
 ```mermaid
 graph TD
     %% Entitas Eksternal
-    Operator([👤 Operator / Petani])
-    Drone([🚁 DJI Drone])
-    SensorIoT([📡 Sensor IoT (ESP32)])
-    BMKG([⛈️ API Cuaca BMKG])
+    Operator(["👤 Operator / Petani"])
+    Drone(["🚁 DJI Drone"])
+    SensorIoT(["📡 Sensor IoT (ESP32)"])
+    BMKG(["⛈️ API Cuaca BMKG"])
 
     %% Sistem Utama
-    subgraph KLASTER SISTEM SMART AWD
+    subgraph KLASTER ["KLASTER SISTEM SMART AWD"]
         
         FE["🖥️ FrontEnd Web (React/OpenLayers)"]
         
