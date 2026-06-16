@@ -189,6 +189,8 @@ export const sensorCalibrations = mst.table('sensor_calibrations', {
   humidityOffsetPct:   numeric('humidity_offset_pct', { precision: 4, scale: 2 }).notNull().default('0.00'),
   calibrationMethod:   text('calibration_method').notNull().default('field_measurement'),
   referenceReadingCm:  numeric('reference_reading_cm', { precision: 7, scale: 2 }),
+  // Jarak maksimum sensor ultrasonik (mm). Rumus: water_level_cm = (sensorMaxDistanceMm - d) / 10
+  sensorMaxDistanceMm: integer('sensor_max_distance_mm').notNull().default(1400),
   calibratedBy:        uuid('calibrated_by').references(() => users.id),
   notes:               text('notes'),
   isActive:            boolean('is_active').notNull().default(true),

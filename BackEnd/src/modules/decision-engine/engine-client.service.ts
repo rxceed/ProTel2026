@@ -16,6 +16,7 @@ import {
 } from '@/db/schema';
 import { getLatestForecast, getActiveWarnings } from '@/modules/weather/bmkg.service';
 import { buildFieldStates } from '@/modules/state-builder/state-builder.service';
+import { runWaterRouting } from './routing.service';
 import { config } from '@/config';
 import { logger } from '@/shared/utils/logger.util';
 
@@ -316,6 +317,13 @@ export async function runDecisionCycleForField(
       { jobId, fieldId, recs: result.recommendations.length, engineVersion: result.engine_version },
       'Decision cycle complete',
     );
+
+    // 14. Trigger water routing asynchronously (ideal case)
+    setImmediate(() => {
+      runWaterRouting(fieldId, jobId, result.recommendations).catch(err =>
+        logger.error({ err, jobId, fieldId }, 'Water routing failed — non-blocking')
+      );
+    });
   } catch (err) {
     await db.update(jobsTable).set({
       status:       'failed',

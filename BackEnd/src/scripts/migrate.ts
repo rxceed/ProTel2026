@@ -35,7 +35,8 @@ async function runMigrate() {
     console.log('   2. ADMIN_PASSWORD=xxx npm run seed:admin — buat user admin\n');
 
   } catch (err: any) {
-    console.error('\n❌ Migration gagal:', err.message, '\n');
+    console.error('\n❌ Migration gagal:');
+    console.error(err);
     process.exit(1);
   } finally {
     await pool.end();

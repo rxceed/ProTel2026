@@ -30,17 +30,18 @@ function getFreshness(lastSeenAt: Date | null): FreshnessStatus {
 // Build state for a single sub-block
 // ---------------------------------------------------------------------------
 interface BuiltState {
-  subBlockId:              string;
-  fieldId:                 string;
-  waterLevelCm:            number | null;
-  waterLevelRawCm:         number | null;
-  temperatureC:            number | null;
-  humidityPct:             number | null;
-  stateSource:             string;
-  freshnessStatus:         FreshnessStatus;
-  lastObservationAt:       Date | null;
-  interpolationConfidence: number | null;
-  recordId:                string | null;
+  subBlockId:               string;
+  fieldId:                  string;
+  waterLevelCm:             number | null;
+  waterLevelRawCm:          number | null;
+  temperatureC:             number | null;
+  humidityPct:              number | null;
+  stateSource:              string;
+  freshnessStatus:          FreshnessStatus;
+  lastObservationAt:        Date | null;
+  interpolationConfidence:  number | null;
+  estimatedFromSubBlockIds: string[] | null; // audit trail: tetangga yang dipakai estimasi
+  recordId:                 string | null;
 }
 
 async function buildSubBlockState(
@@ -72,15 +73,16 @@ async function buildSubBlockState(
     return {
       subBlockId,
       fieldId,
-      waterLevelCm:            latest.waterLevelCm !== null ? parseFloat(latest.waterLevelCm) : null,
-      waterLevelRawCm:         latest.waterLevelRawCm !== null ? parseFloat(latest.waterLevelRawCm) : null,
-      temperatureC:            latest.temperatureC !== null ? parseFloat(latest.temperatureC) : null,
-      humidityPct:             latest.humidityPct !== null ? parseFloat(latest.humidityPct) : null,
-      stateSource:             'observed',
-      freshnessStatus:         freshness,
-      lastObservationAt:       latest.eventTimestamp,
-      interpolationConfidence: null,
-      recordId:                latest.id,
+      waterLevelCm:             latest.waterLevelCm !== null ? parseFloat(latest.waterLevelCm) : null,
+      waterLevelRawCm:          latest.waterLevelRawCm !== null ? parseFloat(latest.waterLevelRawCm) : null,
+      temperatureC:             latest.temperatureC !== null ? parseFloat(latest.temperatureC) : null,
+      humidityPct:              latest.humidityPct !== null ? parseFloat(latest.humidityPct) : null,
+      stateSource:              'observed',
+      freshnessStatus:          freshness,
+      lastObservationAt:        latest.eventTimestamp,
+      interpolationConfidence:  null,
+      estimatedFromSubBlockIds: null,
+      recordId:                 latest.id,
     };
   }
 
@@ -90,15 +92,16 @@ async function buildSubBlockState(
     return {
       subBlockId,
       fieldId,
-      waterLevelCm:            estimate.waterLevelCm,
-      waterLevelRawCm:         null,
-      temperatureC:            null,
-      humidityPct:             null,
-      stateSource:             'estimated',
-      freshnessStatus:         'no_data',
-      lastObservationAt:       latest?.eventTimestamp ?? null,
-      interpolationConfidence: estimate.interpolationConfidence,
-      recordId:                null,
+      waterLevelCm:             estimate.waterLevelCm,
+      waterLevelRawCm:          null,
+      temperatureC:             null,
+      humidityPct:              null,
+      stateSource:              'estimated',
+      freshnessStatus:          'no_data',
+      lastObservationAt:        latest?.eventTimestamp ?? null,
+      interpolationConfidence:  estimate.interpolationConfidence,
+      estimatedFromSubBlockIds: estimate.usedNeighborIds,
+      recordId:                 null,
     };
   }
 
@@ -106,15 +109,16 @@ async function buildSubBlockState(
   return {
     subBlockId,
     fieldId,
-    waterLevelCm:            null,
-    waterLevelRawCm:         null,
-    temperatureC:            null,
-    humidityPct:             null,
-    stateSource:             'no_data',
-    freshnessStatus:         'no_data',
-    lastObservationAt:       null,
-    interpolationConfidence: null,
-    recordId:                null,
+    waterLevelCm:             null,
+    waterLevelRawCm:          null,
+    temperatureC:             null,
+    humidityPct:              null,
+    stateSource:              'no_data',
+    freshnessStatus:          'no_data',
+    lastObservationAt:        null,
+    interpolationConfidence:  null,
+    estimatedFromSubBlockIds: null,
+    recordId:                 null,
   };
 }
 
@@ -139,28 +143,30 @@ export async function buildFieldStates(fieldId: string): Promise<number> {
 
         // 1. History Record (trx.sub_block_states)
         await db.insert(statesTable).values({
-          subBlockId:              state.subBlockId,
-          fieldId:                 state.fieldId,
-          stateTime:               state.lastObservationAt ?? now,
-          waterLevelCm:            state.waterLevelCm?.toFixed(2),
-          waterLevelTrend:         'stable', // placeholder logic
-          stateSource:             state.stateSource,
-          freshnessStatus:         state.freshnessStatus,
-          lastObservationAt:       state.lastObservationAt,
-          interpolationConfidence: state.interpolationConfidence?.toFixed(2),
+          subBlockId:               state.subBlockId,
+          fieldId:                  state.fieldId,
+          stateTime:                state.lastObservationAt ?? now,
+          waterLevelCm:             state.waterLevelCm?.toFixed(2),
+          waterLevelTrend:          'stable', // placeholder logic
+          stateSource:              state.stateSource,
+          freshnessStatus:          state.freshnessStatus,
+          lastObservationAt:        state.lastObservationAt,
+          estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
+          interpolationConfidence:  state.interpolationConfidence?.toFixed(2),
         });
 
         // 2. Current State (trx.sub_block_current_states) — Upsert
         await db.insert(currentStatesTable).values({
-          subBlockId:              state.subBlockId,
-          fieldId:                 state.fieldId,
-          stateTime:               state.lastObservationAt ?? now,
-          waterLevelCm:            state.waterLevelCm?.toFixed(2),
-          stateSource:             state.stateSource,
-          freshnessStatus:         state.freshnessStatus,
-          lastObservationAt:       state.lastObservationAt,
-          interpolationConfidence: state.interpolationConfidence?.toFixed(2),
-          updatedAt:               now,
+          subBlockId:               state.subBlockId,
+          fieldId:                  state.fieldId,
+          stateTime:                state.lastObservationAt ?? now,
+          waterLevelCm:             state.waterLevelCm?.toFixed(2),
+          stateSource:              state.stateSource,
+          freshnessStatus:          state.freshnessStatus,
+          lastObservationAt:        state.lastObservationAt,
+          estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
+          interpolationConfidence:  state.interpolationConfidence?.toFixed(2),
+          updatedAt:                now,
         }).onConflictDoUpdate({
           target: currentStatesTable.subBlockId,
           set: {
@@ -169,7 +175,8 @@ export async function buildFieldStates(fieldId: string): Promise<number> {
             stateSource:             state.stateSource,
             freshnessStatus:         state.freshnessStatus,
             lastObservationAt:       state.lastObservationAt,
-            interpolationConfidence: state.interpolationConfidence?.toFixed(2),
+            estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
+            interpolationConfidence:  state.interpolationConfidence?.toFixed(2),
             updatedAt:               now,
           },
         });

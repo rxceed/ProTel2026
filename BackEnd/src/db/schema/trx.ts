@@ -221,6 +221,8 @@ export const subBlockStates = trx.table('sub_block_states', {
   freshnessStatus:             text('freshness_status').notNull().default('no_data'),
   lastObservationAt:           timestamp('last_observation_at', { withTimezone: true }),
   sourceDeviceId:              uuid('source_device_id').references(() => devices.id, { onDelete: 'set null' }),
+  // Array UUID dari sub-block tetangga yang dipakai untuk estimasi (audit trail DSS)
+  estimatedFromSubBlockIds:    uuid('estimated_from_sub_block_ids').array(),
   interpolationConfidence:     numeric('interpolation_confidence', { precision: 3, scale: 2 }),
   createdAt:                   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -229,18 +231,20 @@ export const subBlockStates = trx.table('sub_block_states', {
 // trx.sub_block_current_states   (CQRS — satu baris per sub-block)
 // ---------------------------------------------------------------------------
 export const subBlockCurrentStates = trx.table('sub_block_current_states', {
-  subBlockId:              uuid('sub_block_id').primaryKey().references(() => subBlocks.id, { onDelete: 'cascade' }),
-  fieldId:                 uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
-  cropCycleId:             uuid('crop_cycle_id').references(() => cropCycles.id, { onDelete: 'set null' }),
-  stateTime:               timestamp('state_time', { withTimezone: true }).notNull(),
-  waterLevelCm:            numeric('water_level_cm', { precision: 7, scale: 2 }),
-  waterLevelTrend:         text('water_level_trend'),
-  stateSource:             text('state_source').notNull().default('no_data'),
-  freshnessStatus:         text('freshness_status').notNull().default('no_data'),
-  lastObservationAt:       timestamp('last_observation_at', { withTimezone: true }),
-  sourceDeviceId:          uuid('source_device_id').references(() => devices.id, { onDelete: 'set null' }),
-  interpolationConfidence: numeric('interpolation_confidence', { precision: 3, scale: 2 }),
-  updatedAt:               timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  subBlockId:                  uuid('sub_block_id').primaryKey().references(() => subBlocks.id, { onDelete: 'cascade' }),
+  fieldId:                     uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  cropCycleId:                 uuid('crop_cycle_id').references(() => cropCycles.id, { onDelete: 'set null' }),
+  stateTime:                   timestamp('state_time', { withTimezone: true }).notNull(),
+  waterLevelCm:                numeric('water_level_cm', { precision: 7, scale: 2 }),
+  waterLevelTrend:             text('water_level_trend'),
+  stateSource:                 text('state_source').notNull().default('no_data'),
+  freshnessStatus:             text('freshness_status').notNull().default('no_data'),
+  lastObservationAt:           timestamp('last_observation_at', { withTimezone: true }),
+  sourceDeviceId:              uuid('source_device_id').references(() => devices.id, { onDelete: 'set null' }),
+  // Array UUID dari sub-block tetangga yang dipakai untuk estimasi (audit trail DSS)
+  estimatedFromSubBlockIds:    uuid('estimated_from_sub_block_ids').array(),
+  interpolationConfidence:     numeric('interpolation_confidence', { precision: 3, scale: 2 }),
+  updatedAt:                   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ---------------------------------------------------------------------------
@@ -371,6 +375,9 @@ export const irrigationRecommendations = trx.table('irrigation_recommendations',
   hasFeedback:               boolean('has_feedback').notNull().default(false),
   lastFeedbackAt:            timestamp('last_feedback_at', { withTimezone: true }),
   engineVersion:             text('engine_version'),
+  // Floyd-Warshall routing enrichment
+  routePathIds:              jsonb('route_path_ids'),          // UUID[] sub_block berurutan source→target
+  routingScore:              numeric('routing_score', { precision: 10, scale: 4 }), // total bobot rute
   createdAt:                 timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -425,4 +432,20 @@ export const orthomosaicPublishHistory = trx.table('orthomosaic_publish_history'
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-
+// ---------------------------------------------------------------------------
+// trx.dss_tasks
+// ---------------------------------------------------------------------------
+export const dssTasks = trx.table('dss_tasks', {
+  id:             uuid('id').primaryKey().defaultRandom(),
+  fieldId:        uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  subBlockId:     uuid('sub_block_id').references(() => subBlocks.id, { onDelete: 'set null' }),
+  taskType:       text('task_type').notNull(),
+  commandText:    text('command_text').notNull(),
+  reason:         text('reason'),
+  priorityScore:  numeric('priority_score', { precision: 3, scale: 2 }), // 0.00 to 1.00
+  status:         text('status').notNull().default('PENDING'),
+  createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt:    timestamp('completed_at', { withTimezone: true }),
+  completedBy:    uuid('completed_by').references(() => users.id, { onDelete: 'set null' }),
+});

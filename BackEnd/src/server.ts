@@ -3,6 +3,7 @@ import { config } from './config';
 import { testConnection, closePool } from './db/client';
 import { logger } from './shared/utils/logger.util';
 import { startScheduler, stopScheduler } from './modules/scheduler/scheduler.service';
+import { startMqttListener } from './modules/telemetry/mqtt.service';
 
 async function bootstrap(): Promise<void> {
   logger.info(`Starting Smart AWD Server 1 [${config.NODE_ENV}]...`);
@@ -19,6 +20,7 @@ async function bootstrap(): Promise<void> {
     // 3. Start cron scheduler (after server is up, non-blocking)
     if (config.NODE_ENV !== 'test') {
       startScheduler();
+      startMqttListener();
     }
   });
 

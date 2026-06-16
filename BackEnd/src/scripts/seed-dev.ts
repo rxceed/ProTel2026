@@ -53,15 +53,21 @@ async function seedDev() {
     `, [sb1Id, fieldId1, sb2Id]);
 
     const dev1Id = randomUUID();
+    const devN2Id = randomUUID();
     await client.query(`
       INSERT INTO mst.devices (id, field_id, device_code, device_type, connection_type, hardware_model, firmware_version)
-      VALUES ($1, $2, 'AWD-DEMAK-001', 'awd_water_level', 'nbiot', 'SMART-AWD-V2', '2.1.0')
+      VALUES 
+        ($1, $2, 'N1', 'awd_water_level', 'lorawan', 'SMART-AWD-V2', '2.1.0'),
+        ($3, $2, 'N2', 'awd_water_level', 'lorawan', 'SMART-AWD-V2', '2.1.0')
       ON CONFLICT DO NOTHING
-    `, [dev1Id, fieldId1]);
+    `, [dev1Id, fieldId1, devN2Id]);
     await client.query(`
       INSERT INTO mst.device_assignments (device_id, sub_block_id, field_id)
-      VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
-    `, [dev1Id, sb1Id, fieldId1]);
+      VALUES 
+        ($1, $2, $4),
+        ($3, $5, $4)
+      ON CONFLICT DO NOTHING
+    `, [dev1Id, sb1Id, devN2Id, fieldId1, sb2Id]);
 
     // ── Field 2: Subang ──────────────────────────────────────────────────────
     const fieldId2 = randomUUID();
@@ -87,7 +93,7 @@ async function seedDev() {
     const dev2Id = randomUUID();
     await client.query(`
       INSERT INTO mst.devices (id, field_id, device_code, device_type, connection_type, hardware_model, firmware_version)
-      VALUES ($1, $2, 'AWD-SUBANG-001', 'awd_water_level', 'lorawan', 'SMART-AWD-V3', '3.0.1')
+      VALUES ($1, $2, 'N3', 'awd_water_level', 'lorawan', 'SMART-AWD-V3', '3.0.1')
       ON CONFLICT DO NOTHING
     `, [dev2Id, fieldId2]);
     await client.query(`
@@ -125,10 +131,10 @@ async function seedDev() {
     // ── Telemetry Records (24 jam tiap sub-block) ────────────────────────────
     console.log('  → telemetry records (24h per sub-block)...');
     const allSbs = [
-      { id: sb1Id, devId: dev1Id, code: 'AWD-DEMAK-001' },
-      { id: sb2Id, devId: dev1Id, code: 'AWD-DEMAK-001' },
-      { id: sb3Id, devId: dev2Id, code: 'AWD-SUBANG-001' },
-      { id: sb4Id, devId: dev2Id, code: 'AWD-SUBANG-001' },
+      { id: sb1Id, devId: dev1Id, code: 'N1' },
+      { id: sb2Id, devId: devN2Id, code: 'N2' },
+      { id: sb3Id, devId: dev2Id, code: 'N3' },
+      { id: sb4Id, devId: dev2Id, code: 'N3' },
     ];
     for (const sb of allSbs) {
       for (let i = 24; i >= 0; i--) {

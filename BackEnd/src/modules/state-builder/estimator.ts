@@ -20,6 +20,7 @@ export interface EstimationResult {
   stateSource:             'estimated';
   interpolationConfidence: number;  // 0.0 – 1.0
   usedNeighborCount:       number;
+  usedNeighborIds:         string[]; // UUID[] untuk estimated_from_sub_block_ids (audit trail)
 }
 
 /**
@@ -113,6 +114,7 @@ export async function estimateFromNeighbors(subBlockId: string): Promise<Estimat
     stateSource:             'estimated',
     interpolationConfidence: Math.round(confidence * 100) / 100,
     usedNeighborCount:       usable.length,
+    usedNeighborIds:         usable.map(n => n.subBlockId),
   };
 }
 
