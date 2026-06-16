@@ -5,62 +5,74 @@ Proyek Smart AWD dipecah menjadi beberapa *Microservices* yang memiliki tugas sp
 
 ## 2. Diagram C4 Komponen & Aliran Data
 ```mermaid
-graph TD
+flowchart LR
     %% Entitas Eksternal
-    Operator(["👤 Operator / Petani"])
-    Drone(["🚁 DJI Drone"])
-    SensorIoT(["📡 Sensor IoT (ESP32)"])
-    BMKG(["⛈️ API Cuaca BMKG"])
-
-    %% Sistem Utama
-    subgraph KLASTER [KLASTER SISTEM SMART AWD]
-        
-        FE["🖥️ FrontEnd Web (React/OpenLayers)"]
-        BE["⚙️ BackEnd Server (Node.js/Express)"]
-        
-        subgraph Python_Cluster [Python Microservices]
-            DSS["🤖 Decision Engine (FastAPI)"]
-            Titiler["🗺️ Titiler COG Server"]
-            GIS["📐 GIS Processing (FastAPI)"]
-            ARQ["⏱️ ARQ Redis Worker"]
-        end
-        
-        WebODM["🏗️ WebODM (Docker Cluster)"]
-        
-        subgraph Database_Cluster [Database Polyglot]
-            Postgres[("Relational & PostGIS")]
-            Timescale[("TimescaleDB (Hypertable)")]
-            Redis[("Redis Memory Cache")]
-        end
-        
-        Cloudflare[("☁️ Cloudflare R2 (Object Storage)")]
-        MQTT["✉️ MQTT Broker (Mosquitto)"]
+    subgraph External [Dunia Eksternal]
+        Operator(["👤 Petani / Operator"])
+        Drone(["🚁 Drone DJI"])
+        SensorIoT(["📡 Sensor IoT"])
+        BMKG(["⛈️ BMKG API"])
     end
 
-    %% Hubungan dan Aliran
-    Operator -->|"Interaksi UI"| FE
-    Drone -->|"Upload Foto JPG"| WebODM
-    SensorIoT -->|"Publish JSON"| MQTT
-    
-    %% Aliran Backend
-    MQTT -->|"Subscribe Ingest"| BE
-    BMKG -->|"Fetch Weather"| BE
-    BE -->|"Read Write Master & Spatial"| Postgres
-    BE -->|"Batch Insert Sensor Data"| Timescale
-    
-    %% Aliran Visual & Drone
-    WebODM -.->|"Konversi TIF to COG"| Cloudflare
-    Cloudflare -.->|"Byte Range Read"| Titiler
-    Titiler -->|"Serve XYZ Map Tiles"| FE
-    BE -->|"Serve API Auth Field Data"| FE
-    
-    %% Aliran Algoritma
-    BE <-->|"Evaluate Req Res"| DSS
-    BE -->|"Post Centroid Graph"| GIS
-    GIS -->|"Enqueue Task"| Redis
-    Redis -->|"Dequeue Compute"| ARQ
-    ARQ -->|"Result"| Redis
-    Redis -->|"Poll Result"| GIS
+    %% Web Client
+    FE["🖥️ FrontEnd (React)"]
+
+    %% Backend Monolith
+    subgraph BE_Cluster [Backend Layer (Node.js)]
+        BE_API["⚙️ Main API (Express)"]
+        BE_Cron["⏱️ Background Jobs"]
+        MQTT_Broker["✉️ MQTT Broker"]
+    end
+
+    %% Python Services
+    subgraph Model_Cluster [AI & Model Layer (Python)]
+        DSS["🤖 DSS Engine"]
+        Titiler["🗺️ Titiler Map"]
+    end
+
+    subgraph GIS_Cluster [GIS Processing Layer]
+        GIS_API["📐 GIS API"]
+        ARQ["🛠️ ARQ Worker"]
+    end
+
+    %% Storage & Infrastructure
+    subgraph Storage [Lumbung Data]
+        Postgres[("🐘 PostGIS")]
+        Timescale[("📈 TimescaleDB")]
+        Redis[("🔴 Redis Cache")]
+        R2[("☁️ Cloudflare R2")]
+        WebODM["🏗️ WebODM (Docker)"]
+    end
+
+    %% --------------------------------
+    %% Relasi yang dirapikan (Linear)
+    %% --------------------------------
+
+    %% Flow UI
+    Operator -->|"Akses Web"| FE
+    FE <-->|"REST API"| BE_API
+    FE <-->|"XYZ Tiles"| Titiler
+
+    %% Flow IoT
+    SensorIoT -->|"Publish"| MQTT_Broker
+    MQTT_Broker -->|"Ingest"| BE_Cron
+    BE_Cron -->|"Simpan Timeseries"| Timescale
+
+    %% Flow Drone
+    Drone -->|"Upload"| WebODM
+    WebODM -.->|"TIF to COG"| R2
+    R2 -.->|"Load Map"| Titiler
+
+    %% Flow Sistem Keputusan (DSS & GIS)
+    BE_Cron -->|"Fetch Weather"| BMKG
+    BE_Cron <-->|"Kirim State & Rules"| DSS
+    BE_API <-->|"Kueri Rute Air"| GIS_API
+    GIS_API <-->|"Antrean Task"| Redis
+    Redis <-->|"Proses Matriks"| ARQ
+
+    %% Flow Database Relasional
+    BE_API <-->|"Kueri PostGIS"| Postgres
+    BE_Cron <-->|"Update State"| Postgres
 ```
 
 ## 3. Penjelasan Interaksi
