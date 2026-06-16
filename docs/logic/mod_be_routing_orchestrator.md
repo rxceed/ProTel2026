@@ -8,24 +8,24 @@ Orkestrator ini menarik titik berat tengah (*Centroid*) per-petak menggunakan Po
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Engine Client as 🧠 BE: engine-client.service
+    participant EngineClient as 🧠 BE: engine-client.service
     participant Orchestrator as 🗺️ BE: routing.service.ts
     participant DB as 🗄️ PostgreSQL (PostGIS)
-    participant GIS API as ⚙️ GIS Processing (Python)
+    participant GISAPI as ⚙️ GIS Processing (Python)
     
-    Engine Client->>Orchestrator: runWaterRouting(recommendations)
+    EngineClient->>Orchestrator: runWaterRouting(recommendations)
     
     Note over Orchestrator: Menentukan Petak "Sumbang Air" (DRAIN) <br/> dan "Butuh Air" (IRRIGATE) berdasarkan Prioritas
     
     Orchestrator->>DB: Kueri ST_Centroid() & ST_AsText() dari seluruh petak
     DB-->>Orchestrator: Hasil (Point X Y, water_height, optimal_height)
     
-    Orchestrator->>GIS API: POST /run (num_nodes, nodes, edges)
-    Note over GIS API: Menjalankan Worker Floyd-Warshall
-    GIS API-->>Orchestrator: Respon Matriks Suksesor (D & P)
+    Orchestrator->>GISAPI: POST /run (num_nodes, nodes, edges)
+    Note over GISAPI: Menjalankan Worker Floyd-Warshall
+    GISAPI-->>Orchestrator: Respon Matriks Suksesor (D & P)
     
-    Orchestrator->>GIS API: POST /matrix (Kirim Source Index & Target Index)
-    GIS API-->>Orchestrator: Array Indeks [0, 1, 4]
+    Orchestrator->>GISAPI: POST /matrix (Kirim Source Index & Target Index)
+    GISAPI-->>Orchestrator: Array Indeks [0, 1, 4]
     
     Note over Orchestrator: Menerjemahkan Indeks: 0 -> "UUID-A", 1 -> "UUID-B"
     
