@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { userFields, subBlocks, devices } from '@/db/schema/mst';
+import { userFields, subBlocks, devices, flowPaths, irrigationPoints } from '@/db/schema/mst';
 import { AppError } from '@/middleware/error.middleware';
 import type { FieldRole, SystemRole } from '@/shared/types';
 
@@ -67,6 +67,28 @@ export function requireFieldAccess(minRole: FieldRole = 'viewer') {
               return;
             }
             fieldId = dev.fieldId;
+          } else if (url.includes('/flow-paths/')) {
+            const [fp] = await db
+              .select({ fieldId: flowPaths.fieldId })
+              .from(flowPaths)
+              .where(eq(flowPaths.id, id))
+              .limit(1);
+            if (!fp) {
+              next(new AppError(404, 'FLOW_PATH_NOT_FOUND', 'Flow path tidak ditemukan'));
+              return;
+            }
+            fieldId = fp.fieldId;
+          } else if (url.includes('/irrigation-points/')) {
+            const [ip] = await db
+              .select({ fieldId: irrigationPoints.fieldId })
+              .from(irrigationPoints)
+              .where(eq(irrigationPoints.id, id))
+              .limit(1);
+            if (!ip) {
+              next(new AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan'));
+              return;
+            }
+            fieldId = ip.fieldId;
           } else {
             fieldId = id;
           }

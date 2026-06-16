@@ -284,24 +284,16 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
         ...toUnassign.map((id: string) => apiClient.post(`/devices/${id}/unassign`))
       ]);
 
-      // Update notes with point coordinates for all currently selected devices
+      // Update coordinates for all currently selected devices
       await Promise.all(
         selectedDeviceIds.map(async (id: string) => {
-          const originalDev = allDevices.find(d => d.id === id);
-          let currentNotesObj: any = {};
-          if (originalDev?.notes) {
-            try {
-              currentNotesObj = JSON.parse(originalDev.notes);
-            } catch (e) {
-              currentNotesObj = { text: originalDev.notes };
-            }
-          }
-          
           const coord = pendingDeviceCoords[id];
           if (coord) {
-            currentNotesObj.location = { x: coord.x, y: coord.y };
-            const updatedNotes = JSON.stringify(currentNotesObj);
-            await apiClient.patch(`/devices/${id}`, { notes: updatedNotes });
+            const geojsonPoint = {
+              type: 'Point',
+              coordinates: [coord.x, coord.y]
+            };
+            await apiClient.patch(`/devices/${id}`, { coordinate: geojsonPoint });
           }
         })
       );
@@ -309,21 +301,7 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
       // Clear coordinates for unassigned devices
       await Promise.all(
         toUnassign.map(async (id: string) => {
-          const originalDev = allDevices.find(d => d.id === id);
-          let currentNotesObj: any = {};
-          if (originalDev?.notes) {
-            try {
-              currentNotesObj = JSON.parse(originalDev.notes);
-            } catch (e) {
-              currentNotesObj = { text: originalDev.notes };
-            }
-          }
-          
-          if (currentNotesObj.location) {
-            delete currentNotesObj.location;
-            const updatedNotes = Object.keys(currentNotesObj).length === 0 ? "" : JSON.stringify(currentNotesObj);
-            await apiClient.patch(`/devices/${id}`, { notes: updatedNotes });
-          }
+          await apiClient.patch(`/devices/${id}`, { coordinate: null });
         })
       );
       

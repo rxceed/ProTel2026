@@ -10,6 +10,7 @@ import {
   flowPathsService,
   cropCyclesService,
   ruleProfilesService,
+  irrigationPointsService,
 } from './master-data.service';
 import {
   CreateFieldSchema,
@@ -23,10 +24,13 @@ import {
   AssignDeviceSchema,
   CalibrateDeviceSchema,
   CreateFlowPathSchema,
+  UpdateFlowPathSchema,
   CreateCropCycleSchema,
   UpdateCropCyclePhaseSchema,
   CreateRuleProfileSchema,
   UpdateRuleProfileSchema,
+  CreateIrrigationPointSchema,
+  UpdateIrrigationPointSchema,
 } from './master-data.schema';
 
 export const masterDataRouter = Router();
@@ -299,7 +303,7 @@ masterDataRouter.post(
 );
 
 // ===========================================================================
-// FLOW PATHS  —  /fields/:fieldId/flow-paths
+// FLOW PATHS  —  /fields/:fieldId/flow-paths  &  /flow-paths/:id
 // ===========================================================================
 
 // GET /fields/:fieldId/flow-paths
@@ -310,6 +314,17 @@ masterDataRouter.get(
   h(async (req, res) => {
     const rows = await flowPathsService.listByField(req.params['fieldId']!);
     res.json(successResponse(rows));
+  }),
+);
+
+// GET /flow-paths/:id
+masterDataRouter.get(
+  '/flow-paths/:id',
+  requireAuth,
+  requireFieldAccess('viewer'),
+  h(async (req, res) => {
+    const fp = await flowPathsService.getById(req.params['id']!);
+    res.json(successResponse(fp));
   }),
 );
 
@@ -325,13 +340,87 @@ masterDataRouter.post(
   }),
 );
 
+// PATCH /flow-paths/:id
+masterDataRouter.patch(
+  '/flow-paths/:id',
+  requireAuth,
+  requireFieldAccess('manager'),
+  validate(UpdateFlowPathSchema),
+  h(async (req, res) => {
+    const fp = await flowPathsService.update(req.params['id']!, req.body);
+    res.json(successResponse(fp));
+  }),
+);
+
 // DELETE /flow-paths/:id
 masterDataRouter.delete(
   '/flow-paths/:id',
   requireAuth,
+  requireFieldAccess('manager'),
   h(async (req, res) => {
     await flowPathsService.delete(req.params['id']!);
     res.json(successResponse({ message: 'Flow path dihapus' }));
+  }),
+);
+
+// ===========================================================================
+// IRRIGATION POINTS  —  /fields/:fieldId/irrigation-points  &  /irrigation-points/:id
+// ===========================================================================
+
+// GET /fields/:fieldId/irrigation-points
+masterDataRouter.get(
+  '/fields/:fieldId/irrigation-points',
+  requireAuth,
+  requireFieldAccess('viewer'),
+  h(async (req, res) => {
+    const rows = await irrigationPointsService.listByField(req.params['fieldId']!);
+    res.json(successResponse(rows));
+  }),
+);
+
+// GET /irrigation-points/:id
+masterDataRouter.get(
+  '/irrigation-points/:id',
+  requireAuth,
+  requireFieldAccess('viewer'),
+  h(async (req, res) => {
+    const ip = await irrigationPointsService.getById(req.params['id']!);
+    res.json(successResponse(ip));
+  }),
+);
+
+// POST /fields/:fieldId/irrigation-points
+masterDataRouter.post(
+  '/fields/:fieldId/irrigation-points',
+  requireAuth,
+  requireFieldAccess('manager'),
+  validate(CreateIrrigationPointSchema),
+  h(async (req, res) => {
+    const ip = await irrigationPointsService.create(req.params['fieldId']!, req.body);
+    res.status(201).json(successResponse(ip));
+  }),
+);
+
+// PATCH /irrigation-points/:id
+masterDataRouter.patch(
+  '/irrigation-points/:id',
+  requireAuth,
+  requireFieldAccess('manager'),
+  validate(UpdateIrrigationPointSchema),
+  h(async (req, res) => {
+    const ip = await irrigationPointsService.update(req.params['id']!, req.body);
+    res.json(successResponse(ip));
+  }),
+);
+
+// DELETE /irrigation-points/:id
+masterDataRouter.delete(
+  '/irrigation-points/:id',
+  requireAuth,
+  requireFieldAccess('manager'),
+  h(async (req, res) => {
+    await irrigationPointsService.delete(req.params['id']!);
+    res.json(successResponse({ message: 'Titik irigasi berhasil dihapus' }));
   }),
 );
 

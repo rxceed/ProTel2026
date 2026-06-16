@@ -165,29 +165,48 @@ export function SubBlockMapEditor({
       devices.forEach((d: any) => {
         const currentSbId = d.subBlockId || d.sub_block_id;
         const isAssigned = (subBlockId && currentSbId === subBlockId) || selectedDeviceIds.includes(d.id);
-        if (isAssigned && d.notes) {
-          try {
-            const parsed = JSON.parse(d.notes);
-            const loc = parsed.location || (typeof parsed.x === 'number' ? parsed : null);
-            if (loc && typeof loc.x === 'number' && typeof loc.y === 'number') {
-              const coords = geoToMapCoords(loc.x, loc.y, !!imageUrl, imageWidth, imageHeight);
-              const geojsonFormat = new GeoJSON();
-              const feature = geojsonFormat.readFeatures({
-                type: 'Feature',
-                geometry: {
-                  type: 'Point',
-                  coordinates: coords
-                },
-                properties: {
-                  type: 'device_marker',
-                  deviceId: d.id,
-                  deviceCode: d.deviceCode
-                }
-              });
-              vectorSource.current.addFeatures(feature);
+        if (isAssigned) {
+          let loc: { x: number; y: number } | null = null;
+          
+          if (d.coordinate) {
+            try {
+              const geom = typeof d.coordinate === 'string' ? JSON.parse(d.coordinate) : d.coordinate;
+              if (geom && geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+                loc = { x: geom.coordinates[0], y: geom.coordinates[1] };
+              }
+            } catch (e) {
+              console.error("Failed to parse device coordinate", e);
             }
-          } catch (e) {
-            // not JSON, ignore
+          }
+          
+          if (!loc && d.notes) {
+            try {
+              const parsed = JSON.parse(d.notes);
+              const l = parsed.location || (typeof parsed.x === 'number' ? parsed : null);
+              if (l && typeof l.x === 'number' && typeof l.y === 'number') {
+                loc = { x: l.x, y: l.y };
+              }
+            } catch (e) {
+              // not JSON, ignore
+            }
+          }
+
+          if (loc) {
+            const coords = geoToMapCoords(loc.x, loc.y, !!imageUrl, imageWidth, imageHeight);
+            const geojsonFormat = new GeoJSON();
+            const feature = geojsonFormat.readFeatures({
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: coords
+              },
+              properties: {
+                type: 'device_marker',
+                deviceId: d.id,
+                deviceCode: d.deviceCode
+              }
+            });
+            vectorSource.current.addFeatures(feature);
           }
         }
       });

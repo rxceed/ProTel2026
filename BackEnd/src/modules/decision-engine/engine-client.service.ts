@@ -134,7 +134,8 @@ export async function runDecisionCycleForField(
         waterSourceType: sql<string>`'irrigated'`, // from field, simplified
       })
       .from(subBlocksTable)
-      .where(and(eq(subBlocksTable.fieldId, fieldId), eq(subBlocksTable.isActive, true)));
+      .where(and(eq(subBlocksTable.fieldId, fieldId), eq(subBlocksTable.isActive, true)))
+      .orderBy(subBlocksTable.displayOrder, subBlocksTable.name);
 
     if (subBlocks.length === 0) {
       await db.update(jobsTable).set({ status: 'skipped', completedAt: new Date() }).where(eq(jobsTable.id, jobId));
@@ -177,12 +178,17 @@ export async function runDecisionCycleForField(
       flagMap.set(f.subBlockId, arr);
     });
 
-    // 8. Load flow paths for field
-    const allFlowPaths = await db.select().from(flowPathsTable)
+    // 8. Load flow paths / matrix for field
+    const [flowPath] = await db.select().from(flowPathsTable)
       .where(and(
-        sql`${flowPathsTable.fromSubBlockId} IN (SELECT id FROM mst.sub_blocks WHERE field_id = ${fieldId})`,
+        eq(flowPathsTable.fieldId, fieldId),
         eq(flowPathsTable.isActive, true),
-      ));
+      ))
+      .limit(1);
+
+    const allFlowPaths = flowPath && flowPath.floydWarshallMatrix
+      ? getDirectEdgesFromMatrix(flowPath.floydWarshallMatrix, subBlocks, flowPath.flowType)
+      : [];
 
     // 9. Load weather + warnings
     const forecast  = await getLatestForecast(fieldId);
@@ -320,4 +326,43 @@ export async function runDecisionCycleForField(
     logger.error({ err, jobId, fieldId }, 'Decision cycle failed');
     throw err;
   }
+}
+
+function getDirectEdgesFromMatrix(
+  matrixJson: any, 
+  subBlocks: { id: string }[], 
+  flowType: string
+): { fromSubBlockId: string; toSubBlockId: string; flowType: string }[] {
+  if (!matrixJson || typeof matrixJson !== 'object') return [];
+  
+  const successor = Array.isArray(matrixJson.successor)
+    ? matrixJson.successor
+    : Array.isArray(matrixJson.successors)
+    ? matrixJson.successors
+    : null;
+    
+  if (!successor || !Array.isArray(successor)) return [];
+  
+  const edges: { fromSubBlockId: string; toSubBlockId: string; flowType: string }[] = [];
+  
+  for (let u = 0; u < successor.length; u++) {
+    const row = successor[u];
+    if (!Array.isArray(row)) continue;
+    for (let v = 0; v < row.length; v++) {
+      const nextHop = row[v];
+      if (nextHop === v && u !== v) {
+        const fromSb = subBlocks[u];
+        const toSb = subBlocks[v];
+        if (fromSb && toSb) {
+          edges.push({
+            fromSubBlockId: fromSb.id,
+            toSubBlockId: toSb.id,
+            flowType: flowType,
+          });
+        }
+      }
+    }
+  }
+  
+  return edges;
 }

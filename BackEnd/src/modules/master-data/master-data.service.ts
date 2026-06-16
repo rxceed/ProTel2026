@@ -11,6 +11,7 @@ import {
   flowPaths as flowPathsTable,
   cropCycles as cropCyclesTable,
   irrigationRuleProfiles as ruleProfilesTable,
+  irrigationPoints as irrigationPointsTable,
 } from '@/db/schema/mst';
 import { telemetryRecords as telemetryRecordsTable } from '@/db/schema/trx';
 import { AppError } from '@/middleware/error.middleware';
@@ -26,9 +27,12 @@ import type {
   AssignDeviceSchema,
   CalibrateDeviceSchema,
   CreateFlowPathSchema,
+  UpdateFlowPathSchema,
   CreateCropCycleSchema,
   UpdateCropCyclePhaseSchema,
   CreateRuleProfileSchema,
+  CreateIrrigationPointSchema,
+  UpdateIrrigationPointSchema,
 } from './master-data.schema';
 import type { z } from 'zod';
 import { config } from '@/config';
@@ -43,9 +47,12 @@ type CreateDeviceInput         = z.infer<typeof CreateDeviceSchema>;
 type AssignDeviceInput         = z.infer<typeof AssignDeviceSchema>;
 type CalibrateDeviceInput      = z.infer<typeof CalibrateDeviceSchema>;
 type CreateFlowPathInput       = z.infer<typeof CreateFlowPathSchema>;
+type UpdateFlowPathInput       = z.infer<typeof UpdateFlowPathSchema>;
 type CreateCropCycleInput      = z.infer<typeof CreateCropCycleSchema>;
 type UpdateCropCyclePhaseInput = z.infer<typeof UpdateCropCyclePhaseSchema>;
 type CreateRuleProfileInput    = z.infer<typeof CreateRuleProfileSchema>;
+type CreateIrrigationPointInput = z.infer<typeof CreateIrrigationPointSchema>;
+type UpdateIrrigationPointInput = z.infer<typeof UpdateIrrigationPointSchema>;
 
 // ===========================================================================
 // FIELDS
@@ -114,6 +121,8 @@ export const fieldsService = {
         notes:                  input.notes,
         mapVisualUrl:           `${GISPROC_API_BASE_URI}/webodm/display?project_name=${createdByUserId}&task_name=${input.name}&asset_type=orthophoto.tif`,
         assignedFileName:       input.assigned_file_name,
+        irrigationEdges:        input.irrigation_edges,
+        irrigationNodes:        input.irrigation_nodes,
       })
       .returning();
 
@@ -141,6 +150,8 @@ export const fieldsService = {
         ...(input.decision_cycle_mode   !== undefined && { decisionCycleMode: input.decision_cycle_mode }),
         ...(input.notes                 !== undefined && { notes: input.notes }),
         ...(input.assigned_file_name    !== undefined && { assignedFileName: input.assigned_file_name }),
+        ...(input.irrigation_edges      !== undefined && { irrigationEdges: input.irrigation_edges }),
+        ...(input.irrigation_nodes      !== undefined && { irrigationNodes: input.irrigation_nodes }),
         updatedAt: new Date(),
       })
       .where(eq(fieldsTable.id, fieldId))
@@ -376,6 +387,7 @@ export const devicesService = {
         lastSeenAt: devicesTable.lastSeenAt,
         notes: devicesTable.notes,
         topic: devicesTable.topic,
+        coordinate: devicesTable.coordinate,
         createdAt: devicesTable.createdAt,
         updatedAt: devicesTable.updatedAt,
       })
@@ -407,6 +419,7 @@ export const devicesService = {
       lastSeenAt: devicesTable.lastSeenAt,
       notes: devicesTable.notes,
       topic: devicesTable.topic,
+      coordinate: devicesTable.coordinate,
       createdAt: devicesTable.createdAt,
       updatedAt: devicesTable.updatedAt,
     })
@@ -435,6 +448,7 @@ export const devicesService = {
       lastSeenAt: devicesTable.lastSeenAt,
       notes: devicesTable.notes,
       topic: devicesTable.topic,
+      coordinate: devicesTable.coordinate,
       createdAt: devicesTable.createdAt,
       updatedAt: devicesTable.updatedAt,
     }).from(devicesTable)
@@ -455,6 +469,7 @@ export const devicesService = {
       fieldId,
       status:          'active',
       notes:           input.notes,
+      coordinate:      input.coordinate,
     }).returning();
     return dev!;
   },
@@ -467,6 +482,7 @@ export const devicesService = {
         ...(input.hardware_model   !== undefined && { hardwareModel: input.hardware_model }),
         ...(input.firmware_version !== undefined && { firmwareVersion: input.firmware_version }),
         ...(input.notes            !== undefined && { notes: input.notes }),
+        ...(input.coordinate       !== undefined && { coordinate: input.coordinate }),
         updatedAt: new Date(),
       })
       .where(eq(devicesTable.id, deviceId))
@@ -558,36 +574,128 @@ export const flowPathsService = {
   async listByField(fieldId: string) {
     return db.select().from(flowPathsTable)
       .where(and(
-        sql`${flowPathsTable.fromSubBlockId} IN (
-          SELECT id FROM mst.sub_blocks WHERE field_id = ${fieldId}
-        )`,
+        eq(flowPathsTable.fieldId, fieldId),
         eq(flowPathsTable.isActive, true),
       ));
   },
 
-  async create(fieldId: string, input: CreateFlowPathInput) {
-    // Validasi kedua sub-block ada dan milik field ini
-    const [from] = await db.select({ fieldId: subBlocksTable.fieldId })
-      .from(subBlocksTable).where(eq(subBlocksTable.id, input.from_sub_block_id)).limit(1);
-    const [to]   = await db.select({ fieldId: subBlocksTable.fieldId })
-      .from(subBlocksTable).where(eq(subBlocksTable.id, input.to_sub_block_id)).limit(1);
+  async getById(id: string) {
+    const [fp] = await db.select().from(flowPathsTable)
+      .where(and(eq(flowPathsTable.id, id), eq(flowPathsTable.isActive, true)))
+      .limit(1);
+    if (!fp) throw new AppError(404, 'FLOW_PATH_NOT_FOUND', 'Flow path tidak ditemukan');
+    return fp;
+  },
 
-    if (!from || from.fieldId !== fieldId) throw new AppError(400, 'INVALID_FROM_SUB_BLOCK', 'from_sub_block_id tidak valid');
-    if (!to   || to.fieldId   !== fieldId) throw new AppError(400, 'INVALID_TO_SUB_BLOCK',   'to_sub_block_id tidak valid');
+  async create(fieldId: string, input: CreateFlowPathInput) {
+    // Validasi field_id exists
+    const [field] = await db.select({ id: fieldsTable.id })
+      .from(fieldsTable).where(eq(fieldsTable.id, fieldId)).limit(1);
+    if (!field) throw new AppError(404, 'FIELD_NOT_FOUND', 'Lahan tidak ditemukan');
 
     const [fp] = await db.insert(flowPathsTable).values({
-      fromSubBlockId: input.from_sub_block_id,
-      toSubBlockId:   input.to_sub_block_id,
-      flowType:       input.flow_type,
-      notes:          input.notes,
+      fieldId,
+      flowType:             input.flow_type,
+      floydWarshallMatrix:  input.floyd_warshall_matrix,
+      notes:                input.notes,
     }).returning();
     return fp!;
+  },
+
+  async update(id: string, input: UpdateFlowPathInput) {
+    const [updated] = await db.update(flowPathsTable)
+      .set({
+        ...(input.flow_type !== undefined && { flowType: input.flow_type }),
+        ...(input.floyd_warshall_matrix !== undefined && { floydWarshallMatrix: input.floyd_warshall_matrix }),
+        ...(input.notes !== undefined && { notes: input.notes }),
+      })
+      .where(eq(flowPathsTable.id, id))
+      .returning();
+    if (!updated) throw new AppError(404, 'FLOW_PATH_NOT_FOUND', 'Flow path tidak ditemukan');
+    return updated;
   },
 
   async delete(flowPathId: string) {
     await db.update(flowPathsTable)
       .set({ isActive: false })
       .where(eq(flowPathsTable.id, flowPathId));
+  },
+};
+
+// ===========================================================================
+// IRRIGATION POINTS
+// ===========================================================================
+
+type RawIrrigationPoint = typeof irrigationPointsTable.$inferSelect;
+
+function parseIrrigationPoint(ip: RawIrrigationPoint) {
+  let coordinatePoint = null;
+  if (ip.coordinatePoint) {
+    try {
+      coordinatePoint = JSON.parse(ip.coordinatePoint);
+    } catch {
+      coordinatePoint = ip.coordinatePoint;
+    }
+  }
+  return {
+    ...ip,
+    coordinatePoint,
+    elevationM: ip.elevationM != null ? parseFloat(ip.elevationM) : null,
+  };
+}
+
+export const irrigationPointsService = {
+  async listByField(fieldId: string) {
+    const rows = await db.select().from(irrigationPointsTable)
+      .where(eq(irrigationPointsTable.fieldId, fieldId));
+    return rows.map(parseIrrigationPoint);
+  },
+
+  async getById(id: string) {
+    const [ip] = await db.select().from(irrigationPointsTable)
+      .where(eq(irrigationPointsTable.id, id))
+      .limit(1);
+    if (!ip) throw new AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan');
+    return parseIrrigationPoint(ip);
+  },
+
+  async create(fieldId: string, input: CreateIrrigationPointInput) {
+    // Validasi field_id exists
+    const [field] = await db.select({ id: fieldsTable.id })
+      .from(fieldsTable).where(eq(fieldsTable.id, fieldId)).limit(1);
+    if (!field) throw new AppError(404, 'FIELD_NOT_FOUND', 'Lahan tidak ditemukan');
+
+    const [ip] = await db.insert(irrigationPointsTable).values({
+      fieldId,
+      pointType:       input.point_type,
+      coordinatePoint: input.coordinate_point ? JSON.stringify(input.coordinate_point) : null,
+      elevationM:      input.elevation_m?.toString(),
+    }).returning();
+
+    return parseIrrigationPoint(ip!);
+  },
+
+  async update(id: string, input: UpdateIrrigationPointInput) {
+    const [updated] = await db.update(irrigationPointsTable)
+      .set({
+        ...(input.point_type !== undefined && { pointType: input.point_type }),
+        ...(input.coordinate_point !== undefined && { 
+          coordinatePoint: input.coordinate_point ? JSON.stringify(input.coordinate_point) : null 
+        }),
+        ...(input.elevation_m !== undefined && { elevationM: input.elevation_m?.toString() }),
+      })
+      .where(eq(irrigationPointsTable.id, id))
+      .returning();
+
+    if (!updated) throw new AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan');
+    return parseIrrigationPoint(updated);
+  },
+
+  async delete(id: string) {
+    const [deleted] = await db.delete(irrigationPointsTable)
+      .where(eq(irrigationPointsTable.id, id))
+      .returning();
+    if (!deleted) throw new AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan');
   },
 };
 
