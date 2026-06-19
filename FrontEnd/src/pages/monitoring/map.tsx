@@ -7,32 +7,27 @@ import OSM from 'ol/source/OSM';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
-import { Style, Fill, Stroke, Text } from 'ol/style';
+import { Style, Fill, Stroke, Text, Circle as CircleStyle } from 'ol/style';
 import { fromLonLat, transformExtent } from 'ol/proj';
 import ImageLayer from 'ol/layer/Image';
 import ImageStatic from 'ol/source/ImageStatic';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { apiClient, gisProcClient } from '@/api/client';
 import axios from 'axios';
 import { getCachedMapImageUrl } from '@/lib/mapCache';
-import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, TrendingUp, GitMerge, ArrowRight } from 'lucide-react';
+import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, GitMerge, ArrowRight } from 'lucide-react';
 
 interface Field {
   id: string;
   name: string;
   mapVisualUrl?: string | null;
   mapBounds?: number[][] | null;
+  irrigationEdges?: any[] | null;
+  irrigationNodes?: any[] | null;
 }
 
-interface IrrigationRoute {
-  routeName: string | null;
-  fromSubBlock: string;
-  toSubBlock: string;
-  weightScore: number; // 0–100
-  estimatedDistance: number;
-  notes?: string | null;
-}
 
 interface CropCycle {
   id: string;
@@ -75,6 +70,431 @@ interface SubBlock {
   centroid: string | null;    // WKT POINT from PostGIS, e.g. "POINT(lng lat)"
 }
 
+interface IrrigationPoint {
+  id: string;
+  fieldId: string;
+  pointType: 'source' | 'drain';
+  coordinatePoint: any;
+  elevationM: string | null;
+}
+
+type RouteEntry = {
+  target: number;
+  path: number[];
+  weight: number;
+};
+
+type MultiTargetResult = {
+  source: number;
+  routes: RouteEntry[];
+};
+
+type NodePosition = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+};
+
+type BackgroundEdge = {
+  from: NodePosition;
+  to: NodePosition;
+  fromIdx: number;
+  toIdx: number;
+  weight: number;
+};
+
+function getNodeCentroidWkt(node: any): string | null {
+  if (!node) return null;
+  if (node.centroid) return node.centroid;
+  if (node.coordinatePoint) {
+    const geom = typeof node.coordinatePoint === 'string'
+      ? JSON.parse(node.coordinatePoint)
+      : node.coordinatePoint;
+    if (geom && geom.type === 'Point' && geom.coordinates) {
+      return `POINT(${geom.coordinates[0]} ${geom.coordinates[1]})`;
+    }
+  }
+  return null;
+}
+
+function IrrigationRouteGraph({
+  matrixResult,
+  subBlocks,
+  sourceIndex,
+  setSourceIndex,
+  floydWarshallMatrix,
+  irrigationPoints,
+}: {
+  matrixResult: MultiTargetResult;
+  subBlocks: SubBlock[];
+  sourceIndex: number;
+  setSourceIndex: (v: number) => void;
+  floydWarshallMatrix: any;
+  irrigationPoints: IrrigationPoint[];
+}) {
+  const routes: RouteEntry[] = Array.isArray(matrixResult.routes) ? matrixResult.routes : [];
+
+  const allNodes = [
+    ...subBlocks,
+    ...irrigationPoints.map(ip => ({
+      id: ip.id,
+      name: ip.pointType === 'source' ? 'SUMBER' : 'BUANG',
+    }))
+  ];
+
+  if (routes.length === 0) {
+    return (
+      <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
+        <Info className="h-4 w-4 shrink-0 mt-0.5" />
+        <span>Tidak ada rute yang dapat dijangkau dari sumber ini. Jalankan Floyd-Warshall untuk memperbarui visualisasi.</span>
+      </div>
+    );
+  }
+
+  const sortedRoutes = [...routes].sort((a, b) => a.weight - b.weight);
+
+  const routeEdgeSet: Record<string, boolean> = {};
+  const edgeRouteWeight: Record<string, number> = {};
+  const routeNodeSet: Record<number, boolean> = {};
+
+  sortedRoutes.forEach((route) => {
+    route.path.forEach((nodeIdx) => { routeNodeSet[nodeIdx] = true; });
+    for (let k = 0; k < route.path.length - 1; k++) {
+      const key = `${route.path[k]}-${route.path[k + 1]}`;
+      routeEdgeSet[key] = true;
+      if (edgeRouteWeight[key] === undefined) {
+        edgeRouteWeight[key] = route.weight;
+      }
+    }
+  });
+
+  const maxRouteWeight = Math.max(...sortedRoutes.map((r) => r.weight));
+  const minRouteWeight = Math.min(...sortedRoutes.map((r) => r.weight));
+
+  const isEdgeOnAnyRoute = (fromIdx: number, toIdx: number) =>
+    !!routeEdgeSet[`${fromIdx}-${toIdx}`];
+
+  const isNodeOnAnyRoute = (nodeIdx: number) => !!routeNodeSet[nodeIdx];
+
+  const getEdgeColor = (fromIdx: number, toIdx: number) => {
+    const key = `${fromIdx}-${toIdx}`;
+    const weight = edgeRouteWeight[key];
+    if (weight === undefined) return '#3b82f6';
+    const range = maxRouteWeight - minRouteWeight;
+    const ratio = range > 0 ? (weight - minRouteWeight) / range : 0;
+    const r = Math.round(16 + ratio * (245 - 16));
+    const g = Math.round(185 + ratio * (158 - 185));
+    const b = Math.round(129 + ratio * (11 - 129));
+    return `rgb(${r},${g},${b})`;
+  };
+
+  const svgSize = 340;
+  const center = svgSize / 2;
+  const radius = 105;
+
+  const nodePositions: NodePosition[] = allNodes.map((node, idx) => {
+    const angle = (2 * Math.PI * idx) / allNodes.length - Math.PI / 2;
+    return {
+      id: node.id,
+      name: node.name,
+      x: center + radius * Math.cos(angle),
+      y: center + radius * Math.sin(angle),
+    };
+  });
+
+  const backgroundEdges: BackgroundEdge[] = [];
+  try {
+    if (floydWarshallMatrix) {
+      const rawMatrix: number[][] | null =
+        Array.isArray(floydWarshallMatrix) ? floydWarshallMatrix
+        : Array.isArray(floydWarshallMatrix?.dist) ? floydWarshallMatrix.dist
+        : Array.isArray(floydWarshallMatrix?.matrix) ? floydWarshallMatrix.matrix
+        : null;
+      if (rawMatrix) {
+        for (let i = 0; i < rawMatrix.length; i++) {
+          for (let j = 0; j < rawMatrix[i].length; j++) {
+            if (i === j) continue;
+            const num = Number(rawMatrix[i][j]);
+            if (isFinite(num) && num > 0 && num < 999 && nodePositions[i] && nodePositions[j]) {
+              backgroundEdges.push({
+                from: nodePositions[i],
+                to: nodePositions[j],
+                fromIdx: i,
+                toIdx: j,
+                weight: num,
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (_) {
+  }  // ignore parse errors
+
+  return (
+    <div className="border-t pt-6 mt-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="bg-emerald-500/10 p-2 rounded-lg">
+          <Activity className="h-4 w-4 text-emerald-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-base font-bold tracking-tight text-foreground">Peta Rute Irigasi Terbaik</h4>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Semua rute optimal dari sumber ke seluruh petak, ditampilkan dalam satu grafik. Warna lebih hijau = prioritas lebih tinggi.
+          </p>
+        </div>
+      </div>
+
+      {/* Source selection only */}
+      <div className="bg-muted/40 p-4 rounded-xl border border-muted/50">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Asal (Source)</label>
+          <select
+            value={sourceIndex}
+            onChange={(e) => setSourceIndex(parseInt(e.target.value))}
+            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 focus:ring-2 focus:ring-primary focus:border-primary cursor-pointer text-slate-900 dark:text-slate-100 font-semibold outline-none shadow-sm"
+          >
+            {allNodes.map((node, idx) => (
+              <option
+                key={node.id}
+                value={idx}
+                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-medium"
+              >
+                {idx + 1}. {node.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* All routes list sorted by weight */}
+      <div className="space-y-2">
+        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">Semua Rute yang Ditemukan (urut prioritas)</span>
+        <div className="space-y-1.5">
+          {sortedRoutes.map((route, rIdx) => {
+            const targetNode = allNodes[route.target];
+            const range = maxRouteWeight - minRouteWeight;
+            const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
+            const badgeClass =
+              ratio < 0.33 ? 'bg-emerald-500 text-white'
+              : ratio < 0.66 ? 'bg-amber-400 text-white'
+              : 'bg-rose-400 text-white';
+            return (
+              <div key={rIdx} className="bg-card border rounded-lg px-3 py-2 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground">#{rIdx + 1}</span>
+                    <span className="text-xs font-semibold text-foreground">
+                      → {targetNode ? targetNode.name : `Node ${route.target + 1}`}
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badgeClass}`}>
+                    {route.weight.toFixed(1)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1">
+                  {route.path.map((nodeIdx, pIdx) => {
+                    const node = allNodes[nodeIdx];
+                    return (
+                      <div key={pIdx} className="flex items-center gap-1">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary">
+                          {node ? node.name : `N${nodeIdx + 1}`}
+                        </span>
+                        {pIdx < route.path.length - 1 && (
+                          <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Unified Circular Graph SVG */}
+      <div className="flex justify-center bg-card/50 border rounded-xl p-4 relative overflow-visible">
+        <svg width={svgSize} height={svgSize} className="overflow-visible">
+          <defs>
+            <marker
+              id="arrow-bg"
+              viewBox="0 0 10 10"
+              refX="18"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 2 L 10 5 L 0 8 z" fill="#94a3b8" opacity="0.5" />
+            </marker>
+            {sortedRoutes.map((route, rIdx) => {
+              const range = maxRouteWeight - minRouteWeight;
+              const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
+              const r = Math.round(16 + ratio * (245 - 16));
+              const g = Math.round(185 + ratio * (158 - 185));
+              const b = Math.round(129 + ratio * (11 - 129));
+              const color = `rgb(${r},${g},${b})`;
+              return (
+                <marker
+                  key={rIdx}
+                  id={`arrow-route-${rIdx}`}
+                  viewBox="0 0 10 10"
+                  refX="18"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 2 L 10 5 L 0 8 z" fill={color} />
+                </marker>
+              );
+            })}
+          </defs>
+
+          {/* Background edges (context) */}
+          {backgroundEdges
+            .filter((edge) => !isEdgeOnAnyRoute(edge.fromIdx, edge.toIdx))
+            .map((edge, idx) => (
+              <line
+                key={`bg-${idx}`}
+                x1={edge.from.x}
+                y1={edge.from.y}
+                x2={edge.to.x}
+                y2={edge.to.y}
+                stroke="#94a3b8"
+                strokeWidth="1"
+                strokeOpacity="0.2"
+                markerEnd="url(#arrow-bg)"
+              />
+            ))
+          }
+
+          {/* Route edges rendered in reverse priority order (lowest weight on top) */}
+          {[...sortedRoutes].reverse().flatMap((route, revIdx) => {
+            const rIdx = sortedRoutes.length - 1 - revIdx;
+            const range = maxRouteWeight - minRouteWeight;
+            const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
+            const strokeW = 3.5 - ratio * 1.5;
+            const opacity = 1 - ratio * 0.4;
+            return route.path.slice(0, -1).map((fromIdx, segIdx) => {
+              const toIdx = route.path[segIdx + 1];
+              const fromPos = nodePositions[fromIdx];
+              const toPos = nodePositions[toIdx];
+              if (!fromPos || !toPos) return null;
+              const segColor = getEdgeColor(fromIdx, toIdx);
+              return (
+                <g key={`route-${rIdx}-seg-${segIdx}`}>
+                  <line
+                    x1={fromPos.x}
+                    y1={fromPos.y}
+                    x2={toPos.x}
+                    y2={toPos.y}
+                    stroke={segColor}
+                    strokeWidth={strokeW}
+                    strokeOpacity={opacity}
+                    markerEnd={`url(#arrow-route-${rIdx})`}
+                    className="transition-all"
+                  />
+                </g>
+              );
+            });
+          })}
+
+          {/* Node circles */}
+          {nodePositions.map((node, idx) => {
+            const onRoute = isNodeOnAnyRoute(idx);
+            const isSource = idx === matrixResult.source;
+            const actualNode = allNodes[idx];
+            const isIrr = actualNode && 'isIrrigationPoint' in actualNode && (actualNode as any).isIrrigationPoint;
+            const pointType = isIrr ? (actualNode as any).pointType : null;
+
+            const nodeColor = isSource
+              ? '#6366f1' // Selected source node in visualization
+              : pointType === 'source'
+              ? '#4f46e5' // Indigo for source points
+              : pointType === 'drain'
+              ? '#f43f5e' // Rose/Red for drains
+              : onRoute
+              ? '#10b981' // Green for other active route nodes
+              : '#3b82f6'; // Blue for idle subblocks
+
+            const nodeR = isSource ? 15 : onRoute ? 13 : 10;
+            return (
+              <g key={idx} className="cursor-pointer group">
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={nodeR}
+                  fill={nodeColor}
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                  opacity={onRoute || isSource ? 1 : 0.4}
+                  className="transition-transform group-hover:scale-110 duration-150"
+                />
+                <text
+                  x={node.x}
+                  y={node.y + 3.5}
+                  textAnchor="middle"
+                  fontSize="9"
+                  fontWeight="bold"
+                  fill="#ffffff"
+                >
+                  {idx + 1}
+                </text>
+                <text
+                  x={node.x}
+                  y={node.y + (node.y > center ? 22 : -16)}
+                  textAnchor="middle"
+                  fontSize="9"
+                  fontWeight={onRoute || isSource ? '700' : '500'}
+                  fill={onRoute || isSource ? '#1e293b' : '#64748b'}
+                  className="paint-order shadow-sm transition-opacity group-hover:opacity-100"
+                >
+                  {node.name}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground bg-muted/30 p-3 rounded-lg border">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-[#6366f1] inline-block" />
+          <span>Sumber Terpilih</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-[#4f46e5] inline-block" />
+          <span>Titik Sumber (Source)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-[#f43f5e] inline-block" />
+          <span>Titik Pembuangan (Drain)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
+          <span>Sub-Block Teririgasi</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 h-1 bg-emerald-500 inline-block rounded" />
+          <span>Prioritas tinggi (jarak kecil)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 h-1 bg-amber-400 inline-block rounded" />
+          <span>Prioritas sedang</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 h-1 bg-rose-400 inline-block rounded" />
+          <span>Prioritas rendah</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MapPage() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
@@ -93,8 +513,6 @@ export function MapPage() {
   const [subBlocks, setSubBlocks] = useState<SubBlock[]>([]);
   const [loadingSubBlocks, setLoadingSubBlocks] = useState(false);
 
-  const [irrigationRoutes, setIrrigationRoutes] = useState<IrrigationRoute[]>([]);
-  const [loadingRoutes, setLoadingRoutes] = useState(false);
 
   // subBlockConnections[sourceId] = [targetId, ...] — directed adjacency list (one-way edges)
   const [subBlockConnections, setSubBlockConnections] = useState<Record<string, string[]>>({});
@@ -104,6 +522,291 @@ export function MapPage() {
   const [activeCropCycle, setActiveCropCycle] = useState<CropCycle | null>(null);
   const [loadingCycle, setLoadingCycle] = useState(false);
   const [resolvedRuleProfile, setResolvedRuleProfile] = useState<RuleProfile | null>(null);
+  const [runningFloydWarshall, setRunningFloydWarshall] = useState(false);
+  const [matrixResult, setMatrixResult] = useState<any>(null);
+  const [loadingMatrix, setLoadingMatrix] = useState(false);
+  const [sourceIndex, setSourceIndex] = useState<number>(0);
+  const [floydWarshallMatrix, setFloydWarshallMatrix] = useState<any>(null);
+  const [irrigationPoints, setIrrigationPoints] = useState<IrrigationPoint[]>([]);
+  const [devices, setDevices] = useState<any[]>([]);
+
+  const getNodeCentroidById = (id: string): string | null => {
+    const sb = subBlocks.find(s => s.id === id);
+    if (sb) return sb.centroid;
+    const ip = irrigationPoints.find(p => p.id === id);
+    if (ip) {
+      return getNodeCentroidWkt(ip);
+    }
+    return null;
+  };
+
+  const saveConnectionsToLocalStorage = async (connections: Record<string, string[]>) => {
+    const edges = Object.entries(connections).flatMap(
+      ([fromId, toIds]) => toIds.map(toId => ({
+        from:          fromId,
+        to:            toId,
+        from_centroid: getNodeCentroidById(fromId),
+        to_centroid:   getNodeCentroidById(toId),
+      }))
+    );
+    try {
+      await apiClient.patch(`/fields/${selectedFieldId}`, {
+        irrigation_edges: edges,
+      });
+      setFields(prev => prev.map(f => f.id === selectedFieldId ? { ...f, irrigationEdges: edges } : f));
+    } catch (err) {
+      console.error('Failed to save irrigation edges to database', err);
+    }
+  };
+
+  const getEligibleTargets = (fromId: string, isIrrPoint: boolean) => {
+    if (isIrrPoint) {
+      const ip = irrigationPoints.find(p => p.id === fromId);
+      if (ip && ip.pointType === 'drain') {
+        return []; // Drain cannot route to anything
+      }
+    }
+
+    const targets: { id: string; name: string }[] = [];
+
+    // Add sub-blocks (excluding itself if fromId is a sub-block)
+    subBlocks.forEach(sb => {
+      if (sb.id !== fromId) {
+        targets.push({ id: sb.id, name: sb.name });
+      }
+    });
+
+    // Add drains (excluding itself if fromId is a drain)
+    irrigationPoints.forEach(ip => {
+      if (ip.pointType === 'drain' && ip.id !== fromId) {
+        const elevText = ip.elevationM ? ` (${ip.elevationM} m)` : '';
+        targets.push({ id: ip.id, name: `BUANG${elevText}` });
+      }
+    });
+
+    return targets;
+  };
+
+  const fetchMatrixResult = async () => {
+    try {
+      if (!selectedFieldId) {
+        setMatrixResult(null);
+        return;
+      }
+
+      let matrixData = floydWarshallMatrix;
+      if (!matrixData) {
+        setLoadingMatrix(true);
+        const response = await apiClient.get(`/fields/${selectedFieldId}/flow-paths`);
+        const flowPath = response.data.data?.[0];
+        if (flowPath && flowPath.floydWarshallMatrix) {
+          matrixData = flowPath.floydWarshallMatrix;
+          setFloydWarshallMatrix(matrixData);
+        }
+      }
+
+      if (!matrixData) {
+        setMatrixResult(null);
+        return;
+      }
+
+      setLoadingMatrix(true);
+
+      let matrix = matrixData;
+      let successor = null;
+      if (matrixData && !Array.isArray(matrixData)) {
+        if (Array.isArray(matrixData.dist)) {
+          matrix = matrixData.dist;
+        } else if (Array.isArray(matrixData.matrix)) {
+          matrix = matrixData.matrix;
+        }
+
+        if (Array.isArray(matrixData.successor)) {
+          successor = matrixData.successor;
+        } else if (Array.isArray(matrixData.successors)) {
+          successor = matrixData.successors;
+        }
+      }
+
+      // Construct the request body (no target for multi-target endpoint)
+      const payload = {
+        matrix: matrix,
+        successor: successor,
+        source: sourceIndex,
+      };
+
+      // Send the POST request to host/api/floydwarshall/matrix/multi-target
+      const response = await gisProcClient.post('/api/floydwarshall/matrix/chained-routes', payload);
+      setMatrixResult(response.data);
+    } catch (err) {
+      console.error('Failed to fetch matrix visualization data', err);
+      setMatrixResult(null);
+    } finally {
+      setLoadingMatrix(false);
+    }
+  };
+
+  // Refetch matrix result when source or selected field changes
+  // Refetch matrix result when source or selected field changes
+  useEffect(() => {
+    if (subBlocks.length > 0 || irrigationPoints.length > 0) {
+      fetchMatrixResult();
+    } else {
+      setMatrixResult(null);
+    }
+  }, [sourceIndex, selectedFieldId, floydWarshallMatrix]);
+
+  // Reset source in bounds when subBlocks or irrigationPoints change
+  useEffect(() => {
+    if (subBlocks.length > 0 || irrigationPoints.length > 0) {
+      setSourceIndex(0);
+    }
+  }, [subBlocks, irrigationPoints]);
+
+
+
+  const handleRunFloydWarshall = async () => {
+    if (!selectedFieldId || (subBlocks.length === 0 && irrigationPoints.length === 0)) return;
+    try {
+      setRunningFloydWarshall(true);
+
+      // 1. Fetch latest states to get the current water level for each subblock
+      const stateResults = await Promise.all(
+        subBlocks.map(sb =>
+          apiClient
+            .get(`/telemetry/sub-blocks/${sb.id}/states/latest`)
+            .then(r => ({ subBlockId: sb.id, waterLevelCm: r.data.data?.waterLevelCm ?? null }))
+            .catch(() => ({ subBlockId: sb.id, waterLevelCm: null }))
+        )
+      );
+      const stateMap: Record<string, string | null> = {};
+      stateResults.forEach(s => { stateMap[s.subBlockId] = s.waterLevelCm; });
+
+      const optimalHeight = resolvedRuleProfile?.awdUpperTargetCm ?? null;
+
+      // 2. Map nodes (both sub-blocks and irrigation points)
+      const allNodes = [
+        ...subBlocks,
+        ...irrigationPoints.map(ip => ({
+          id: ip.id,
+          name: ip.pointType === 'source' ? 'SUMBER' : 'BUANG',
+          pointType: ip.pointType,
+          coordinatePoint: ip.coordinatePoint,
+          elevationM: ip.elevationM,
+          isIrrigationPoint: true,
+          areaM2: 0.0001,
+        }))
+      ];
+
+      const nodesPayload = allNodes.map(node => {
+        let water_height = 0;
+        let optimal_height = 0;
+        let area = 0.0001;
+        const elevation = node.elevationM !== null ? parseFloat(node.elevationM as string) : 0;
+
+        const isIrrigation = 'isIrrigationPoint' in node && (node as any).isIrrigationPoint === true;
+        if (!isIrrigation) {
+          const sb = node as SubBlock;
+          const waterHeightVal = stateMap[sb.id];
+          water_height = waterHeightVal != null ? parseFloat(waterHeightVal) : 0;
+          optimal_height = optimalHeight != null ? parseFloat(optimalHeight as any) : 0;
+          area = sb.areaM2 !== null ? parseFloat(sb.areaM2 as any) : 0;
+        } else {
+          // Treat water level and optimal level as neutral (both value are the same)
+          water_height = 0;
+          optimal_height = 0;
+          area = 0.0001;
+        }
+
+        return {
+          area,
+          water_height,
+          optimal_height,
+          elevation,
+        };
+      });
+
+      // 3. Map edges (both sub-blocks and irrigation points)
+      const edgesPayload = Object.entries(subBlockConnections).flatMap(
+        ([fromId, toIds]) => {
+          const u = allNodes.findIndex(node => node.id === fromId);
+          if (u === -1) return [];
+
+          const fromNode = allNodes[u];
+          // If fromNode is a drain, it cannot route to anything
+          if ('isIrrigationPoint' in fromNode && (fromNode as any).isIrrigationPoint && (fromNode as any).pointType === 'drain') {
+            return [];
+          }
+
+          return toIds.map(toId => {
+            const v = allNodes.findIndex(node => node.id === toId);
+            if (v === -1) return null;
+
+            const toNode = allNodes[v];
+            // If toNode is a source, nothing can route to it
+            if ('isIrrigationPoint' in toNode && (toNode as any).isIrrigationPoint && (toNode as any).pointType === 'source') {
+              return null;
+            }
+
+            const centroid_u = getNodeCentroidWkt(fromNode) ?? "";
+            const centroid_v = getNodeCentroidWkt(toNode) ?? "";
+
+            return {
+              u,
+              v,
+              centroid_u,
+              centroid_v,
+            };
+          }).filter((edge): edge is NonNullable<typeof edge> => edge !== null);
+        }
+      );
+
+      // 4. Construct payload
+      const payload = {
+        num_nodes: nodesPayload.length,
+        nodes: nodesPayload,
+        edges: edgesPayload,
+        directed: true,
+        direction: true,
+      };
+
+      // 5. POST request to host/api/floydwarshall/run
+      const response = await gisProcClient.post('/api/floydwarshall/run', payload);
+
+      // Save response to backend database instead of localStorage
+      try {
+        const fpListRes = await apiClient.get(`/fields/${selectedFieldId}/flow-paths`);
+        const existingPath = fpListRes.data.data?.[0];
+
+        if (existingPath) {
+          await apiClient.patch(`/flow-paths/${existingPath.id}`, {
+            floyd_warshall_matrix: response.data,
+          });
+        } else {
+          await apiClient.post(`/fields/${selectedFieldId}/flow-paths`, {
+            flow_type: 'natural',
+            floyd_warshall_matrix: response.data,
+            notes: 'Floyd-Warshall routing matrix',
+          });
+        }
+      } catch (dbErr) {
+        console.error('Failed to save Floyd-Warshall matrix to backend database', dbErr);
+      }
+
+      // Update state
+      setFloydWarshallMatrix(response.data);
+
+      // Fetch the matrix visualization result
+      await fetchMatrixResult();
+      
+      alert('Floyd-Warshall routing run successfully and result saved to database!');
+    } catch (err) {
+      console.error('Failed to run Floyd-Warshall routing', err);
+      alert('Gagal menjalankan Floyd-Warshall routing: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRunningFloydWarshall(false);
+    }
+  };
 
   const vectorSource = useRef(new VectorSource());
   const imageLayer = useRef(new ImageLayer());
@@ -131,7 +834,7 @@ export function MapPage() {
     if (!map) return;
     const clickHandler = (evt: any) => {
       const feature = map.forEachFeatureAtPixel(evt.pixel, (feat) => feat);
-      if (feature) {
+      if (feature && !feature.get('isDevice') && !feature.get('isIrrigationPoint')) {
         setSelectedSubBlock({
           id: feature.get('id'),
           name: feature.get('name')
@@ -171,6 +874,45 @@ export function MapPage() {
         new VectorLayer({
           source: vectorSource.current,
           style: (feature) => {
+            const isIrrPoint = feature.get('isIrrigationPoint');
+            if (isIrrPoint) {
+              const pointType = feature.get('pointType');
+              const color = pointType === 'source' ? '#22c55e' : '#ef4444';
+              const textColor = pointType === 'source' ? '#15803d' : '#b91c1c';
+              return new Style({
+                image: new CircleStyle({
+                  radius: 8,
+                  fill: new Fill({ color }),
+                  stroke: new Stroke({ color: '#fff', width: 2 })
+                }),
+                text: new Text({
+                  text: feature.get('name'),
+                  font: 'bold 10px Inter, sans-serif',
+                  offsetY: -14,
+                  fill: new Fill({ color: textColor }),
+                  stroke: new Stroke({ color: '#fff', width: 2 })
+                })
+              });
+            }
+
+            const isDevice = feature.get('isDevice');
+            if (isDevice) {
+              return new Style({
+                image: new CircleStyle({
+                  radius: 6,
+                  fill: new Fill({ color: '#3b82f6' }),
+                  stroke: new Stroke({ color: '#fff', width: 2 })
+                }),
+                text: new Text({
+                  text: feature.get('deviceCode') || 'Device',
+                  font: 'bold 10px Inter, sans-serif',
+                  offsetY: -12,
+                  fill: new Fill({ color: '#1d4ed8' }),
+                  stroke: new Stroke({ color: '#fff', width: 2 })
+                })
+              });
+            }
+
             return new Style({
               stroke: new Stroke({
                 color: '#16a34a',
@@ -354,14 +1096,20 @@ export function MapPage() {
     setResolvedRuleProfile(matched ?? null);
   }, [activeCropCycle, ruleProfiles]);
 
-  // 3b. Fetch Sub-blocks data for the irrigation management card
+  // 3b. Fetch Sub-blocks, Irrigation Points & Devices data for the irrigation management card
   useEffect(() => {
     if (!selectedFieldId) return;
     const fetchSubBlocksData = async () => {
       try {
         setLoadingSubBlocks(true);
-        const response = await apiClient.get(`/fields/${selectedFieldId}/sub-blocks`);
-        setSubBlocks(response.data.data);
+        const [subBlocksRes, pointsRes, devicesRes] = await Promise.all([
+          apiClient.get(`/fields/${selectedFieldId}/sub-blocks`),
+          apiClient.get(`/fields/${selectedFieldId}/irrigation-points`),
+          apiClient.get(`/fields/${selectedFieldId}/devices`)
+        ]);
+        setSubBlocks(subBlocksRes.data.data);
+        setIrrigationPoints(pointsRes.data.data);
+        setDevices(devicesRes.data.data || []);
       } catch (err) {
         console.error('Failed to fetch sub-blocks data', err);
       } finally {
@@ -371,71 +1119,76 @@ export function MapPage() {
     fetchSubBlocksData();
   }, [selectedFieldId]);
 
-  // Reset connections whenever the sub-block list changes (e.g. different field selected)
+  // Load Floyd-Warshall matrix from backend database whenever selectedFieldId changes
   useEffect(() => {
-    setSubBlockConnections({});
-  }, [subBlocks]);
+    if (!selectedFieldId) {
+      setFloydWarshallMatrix(null);
+      return;
+    }
 
-  // 3c. Fetch irrigation route recommendations
-  useEffect(() => {
-    if (!selectedFieldId || subBlocks.length === 0) return;
-    const fetchIrrigationRoutes = async () => {
+    const fetchFloydWarshallMatrix = async () => {
       try {
-        setLoadingRoutes(true);
-
-        // Fetch latest state (waterLevelCm) for each sub-block in parallel
-        const stateResults = await Promise.all(
-          subBlocks.map(sb =>
-            apiClient
-              .get(`/telemetry/sub-blocks/${sb.id}/states/latest`)
-              .then(r => ({ subBlockId: sb.id, waterLevelCm: r.data.data?.waterLevelCm ?? null }))
-              .catch(() => ({ subBlockId: sb.id, waterLevelCm: null }))
-          )
-        );
-        const stateMap: Record<string, string | null> = {};
-        stateResults.forEach(s => { stateMap[s.subBlockId] = s.waterLevelCm; });
-
-        const optimalHeight = resolvedRuleProfile?.awdUpperTargetCm ?? null;
-
-        const nodes = subBlocks.map(sb => ({
-          area:           sb.areaM2,
-          water_height:   stateMap[sb.id] != null ? parseFloat(stateMap[sb.id] as string) : null,
-          optimal_height: optimalHeight,
-          elevation:      sb.elevationM !== null ? parseFloat(sb.elevationM as string) : null,
-        }));
-
-        // Build directed edge list from the connection settings, including centroids
-        const subBlockMap = new globalThis.Map(subBlocks.map(sb => [sb.id, sb]));
-        const edges = Object.entries(subBlockConnections).flatMap(
-          ([fromId, toIds]) => toIds.map(toId => ({
-            from:          fromId,
-            to:            toId,
-            from_centroid: subBlockMap.get(fromId)?.centroid ?? null,
-            to_centroid:   subBlockMap.get(toId)?.centroid ?? null,
-          }))
-        );
-
-        //const response = await gisProcClient.post('/api/floydwarshall/reconstruct', { nodes: payload, edges });
-        //setIrrigationRoutes(response.data);
-        console.debug('[fetchIrrigationRoutes] payload:', nodes, 'edges:', edges);
+        const response = await apiClient.get(`/fields/${selectedFieldId}/flow-paths`);
+        const flowPath = response.data.data?.[0]; // Get the first active flow path
+        if (flowPath && flowPath.floydWarshallMatrix) {
+          setFloydWarshallMatrix(flowPath.floydWarshallMatrix);
+        } else {
+          setFloydWarshallMatrix(null);
+        }
       } catch (err) {
-        console.error('Failed to fetch irrigation routes', err);
-      } finally {
-        setLoadingRoutes(false);
+        console.error('Failed to fetch Floyd-Warshall matrix from backend', err);
+        setFloydWarshallMatrix(null);
       }
     };
-    fetchIrrigationRoutes();
-  }, [selectedFieldId, subBlocks, resolvedRuleProfile, subBlockConnections]);
 
-  // 3. Fetch & Render Sub-blocks for Selected Field
+    fetchFloydWarshallMatrix();
+  }, [selectedFieldId]);
+
+  // Reset connections whenever the sub-block list changes (e.g. different field selected)
+  // unless there are saved edges in localStorage, which we prioritize.
+  useEffect(() => {
+    if (!selectedFieldId) {
+      setSubBlockConnections({});
+      return;
+    }
+    try {
+      const field = fields.find(f => f.id === selectedFieldId);
+      const edges = field?.irrigationEdges;
+      if (Array.isArray(edges) && edges.length > 0) {
+        const connections: Record<string, string[]> = {};
+        edges.forEach(edge => {
+          if (edge && edge.from && edge.to) {
+            if (!connections[edge.from]) connections[edge.from] = [];
+            if (!connections[edge.from].includes(edge.to)) connections[edge.from].push(edge.to);
+          }
+        });
+        setSubBlockConnections(connections);
+        return;
+      }
+    } catch (e) {
+      console.error('Error loading subBlockConnections from database on subBlocks change', e);
+    }
+    setSubBlockConnections({});
+  }, [subBlocks, irrigationPoints, selectedFieldId, fields]);
+
+
+
+  // 3. Fetch & Render Sub-blocks, Irrigation Points & Devices for Selected Field
   useEffect(() => {
     if (!selectedFieldId || !map) return;
 
-    const fetchSubBlocks = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await apiClient.get(`/fields/${selectedFieldId}/sub-blocks`);
-        const subBlocks: SubBlock[] = response.data.data;
+        const [subBlocksRes, pointsRes, devicesRes] = await Promise.all([
+          apiClient.get(`/fields/${selectedFieldId}/sub-blocks`),
+          apiClient.get(`/fields/${selectedFieldId}/irrigation-points`),
+          apiClient.get(`/fields/${selectedFieldId}/devices`)
+        ]);
+
+        const subBlocks: SubBlock[] = subBlocksRes.data.data;
+        const points: IrrigationPoint[] = pointsRes.data.data;
+        const devicesData: any[] = devicesRes.data.data || [];
 
         vectorSource.current.clear();
 
@@ -445,7 +1198,6 @@ export function MapPage() {
         subBlocks.forEach((sb) => {
           if (!sb.polygonGeom) return;
           try {
-            // Check if it's already an object or a string
             const geom = typeof sb.polygonGeom === 'string' 
               ? JSON.parse(sb.polygonGeom) 
               : sb.polygonGeom;
@@ -466,6 +1218,89 @@ export function MapPage() {
             features.push(feature);
           } catch (e) {
             console.error(`Invalid geometry for sub-block ${sb.name}`, e);
+          }
+        });
+
+        points.forEach((ip) => {
+          if (!ip.coordinatePoint) return;
+          try {
+            const geom = typeof ip.coordinatePoint === 'string'
+              ? JSON.parse(ip.coordinatePoint)
+              : ip.coordinatePoint;
+
+            if (!geom || !geom.coordinates || geom.coordinates.length === 0) return;
+
+            const feature = geojsonFormat.readFeature(
+              {
+                type: 'Feature',
+                geometry: geom,
+                properties: { 
+                  id: ip.id, 
+                  name: ip.pointType === 'source' ? 'SUMBER' : 'BUANG',
+                  isIrrigationPoint: true,
+                  pointType: ip.pointType
+                },
+              },
+              {
+                dataProjection: 'EPSG:4326',
+                featureProjection: 'EPSG:3857',
+              }
+            );
+            features.push(feature);
+          } catch (e) {
+            console.error(`Invalid geometry for irrigation point ${ip.id}`, e);
+          }
+        });
+
+        devicesData.forEach((d) => {
+          let loc: { x: number; y: number } | null = null;
+          if (d.coordinate) {
+            try {
+              const geom = typeof d.coordinate === 'string' ? JSON.parse(d.coordinate) : d.coordinate;
+              if (geom && geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+                loc = { x: geom.coordinates[0], y: geom.coordinates[1] };
+              }
+            } catch (e) {
+              console.error("Failed to parse device coordinate", e);
+            }
+          }
+          if (!loc && d.notes) {
+            try {
+              const parsed = JSON.parse(d.notes);
+              const l = parsed.location || (typeof parsed.x === 'number' ? parsed : null);
+              if (l && typeof l.x === 'number' && typeof l.y === 'number') {
+                loc = { x: l.x, y: l.y };
+              }
+            } catch (e) {
+              // not JSON, ignore
+            }
+          }
+
+          if (loc) {
+            try {
+              const feature = geojsonFormat.readFeature(
+                {
+                  type: 'Feature',
+                  geometry: {
+                    type: 'Point',
+                    coordinates: [loc.x, loc.y]
+                  },
+                  properties: {
+                    id: d.id,
+                    name: d.deviceCode || 'Device',
+                    isDevice: true,
+                    deviceCode: d.deviceCode
+                  }
+                },
+                {
+                  dataProjection: 'EPSG:4326',
+                  featureProjection: 'EPSG:3857'
+                }
+              );
+              features.push(feature);
+            } catch (e) {
+              console.error(`Invalid coordinates for device ${d.deviceCode}`, e);
+            }
           }
         });
 
@@ -502,7 +1337,7 @@ export function MapPage() {
         if (features.length > 0) {
           vectorSource.current.addFeatures(features);
           
-          // Fit view to sub-blocks
+          // Fit view to sub-blocks and points
           const extent = vectorSource.current.getExtent();
           if (extent && extent[0] !== Infinity && extent[0] !== -Infinity) {
             map.getView().fit(extent, {
@@ -512,13 +1347,13 @@ export function MapPage() {
           }
         }
       } catch (err) {
-        console.error('Failed to fetch sub-blocks', err);
+        console.error('Failed to fetch sub-blocks & points', err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSubBlocks();
+    fetchData();
   }, [selectedFieldId, map]);
 
   return (
@@ -698,7 +1533,7 @@ export function MapPage() {
                 </div>
                 <div className="flex items-center gap-2">
                    <div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm border border-white"></div>
-                   <span>Device / Sensor (AWD)</span>
+                   <span>Device / Sensor (AWD) ({devices.length})</span>
                 </div>
              </CardContent>
            </Card>
@@ -1010,28 +1845,113 @@ export function MapPage() {
                       </span>
                     </div>
 
-                    {/* Connection editor — pick which sub-blocks this one flows into */}
-                    {subBlocks.length > 1 && (
+                    {/* Connection editor — pick which targets this one flows into */}
+                    {getEligibleTargets(sb.id, false).length > 0 && (
                       <div className="pt-2 border-t border-dashed border-current/10 space-y-1.5">
                         <div className="flex items-center gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
                           <ArrowRight className="h-3 w-3" />
                           <span>Alirkan ke</span>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {subBlocks
-                            .filter(target => target.id !== sb.id)
-                            .map(target => {
-                              const isConnected = (subBlockConnections[sb.id] ?? []).includes(target.id);
+                          {getEligibleTargets(sb.id, false).map(target => {
+                            const isConnected = (subBlockConnections[sb.id] ?? []).includes(target.id);
+                            return (
+                              <button
+                                key={target.id}
+                                onClick={() => {
+                                  setSubBlockConnections(prev => {
+                                    const current = prev[sb.id] ?? [];
+                                    const updated = isConnected
+                                      ? current.filter(id => id !== target.id)
+                                      : [...current, target.id];
+                                    const newConnections = { ...prev, [sb.id]: updated };
+                                    saveConnectionsToLocalStorage(newConnections);
+                                    return newConnections;
+                                  });
+                                }}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-150 ${
+                                  isConnected
+                                    ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                                    : 'bg-transparent text-muted-foreground border-muted-foreground/20 hover:border-primary/60 hover:text-foreground'
+                                }`}
+                              >
+                                {target.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Section for Irrigation Points */}
+          {irrigationPoints.length > 0 && (
+            <div className="space-y-3 mt-6 border-t pt-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-indigo-500/10 p-1.5 rounded-lg">
+                  <Activity className="h-4 w-4 text-indigo-500" />
+                </div>
+                <h4 className="text-sm font-bold text-foreground">Daftar Titik Irigasi</h4>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {irrigationPoints.map((ip, idx) => {
+                  const isSource = ip.pointType === 'source';
+                  const accent = isSource
+                    ? { border: 'border-indigo-500/30', bg: 'bg-indigo-500/5', text: 'text-indigo-600 dark:text-indigo-400', dot: 'bg-indigo-500', label: 'SUMBER' }
+                    : { border: 'border-rose-500/30', bg: 'bg-rose-500/5', text: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-500', label: 'BUANG' };
+
+                  return (
+                    <div
+                      key={ip.id}
+                      className={`rounded-xl border ${accent.border} ${accent.bg} p-4 flex flex-col gap-3 hover:shadow-md transition-shadow`}
+                    >
+                      {/* Header */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${accent.dot}`} />
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${isSource ? 'bg-indigo-500 text-white' : 'bg-rose-500 text-white'}`}>
+                            {accent.label}
+                          </span>
+                          <span className="font-bold text-sm truncate text-foreground">
+                            Titik {isSource ? 'Sumber' : 'Buang'} #{idx + 1}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Info rows */}
+                      <div className="space-y-1.5 text-xs text-muted-foreground">
+                        <div className="flex justify-between">
+                          <span>Elevasi</span>
+                          <span className="font-semibold text-foreground">{ip.elevationM ? `${ip.elevationM} m` : '—'}</span>
+                        </div>
+                      </div>
+
+                      {/* Connection editor */}
+                      {isSource && getEligibleTargets(ip.id, true).length > 0 && (
+                        <div className="pt-2 border-t border-dashed border-current/10 space-y-1.5">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase text-muted-foreground">
+                            <ArrowRight className="h-3 w-3" />
+                            <span>Alirkan ke</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {getEligibleTargets(ip.id, true).map(target => {
+                              const isConnected = (subBlockConnections[ip.id] ?? []).includes(target.id);
                               return (
                                 <button
                                   key={target.id}
                                   onClick={() => {
                                     setSubBlockConnections(prev => {
-                                      const current = prev[sb.id] ?? [];
+                                      const current = prev[ip.id] ?? [];
                                       const updated = isConnected
                                         ? current.filter(id => id !== target.id)
                                         : [...current, target.id];
-                                      return { ...prev, [sb.id]: updated };
+                                      const newConnections = { ...prev, [ip.id]: updated };
+                                      saveConnectionsToLocalStorage(newConnections);
+                                      return newConnections;
                                     });
                                   }}
                                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-150 ${
@@ -1044,12 +1964,13 @@ export function MapPage() {
                                 </button>
                               );
                             })}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -1068,17 +1989,19 @@ export function MapPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {allEdges.map(({ fromId, toId }, idx) => {
-                    const fromSb = subBlocks.find(s => s.id === fromId);
-                    const toSb   = subBlocks.find(s => s.id === toId);
+                    const fromSb = subBlocks.find(s => s.id === fromId) || irrigationPoints.find(ip => ip.id === fromId);
+                    const toSb   = subBlocks.find(s => s.id === toId) || irrigationPoints.find(ip => ip.id === toId);
                     const isBidirectional = (subBlockConnections[toId] ?? []).includes(fromId);
+                    const fromName = fromSb ? ('pointType' in fromSb ? (fromSb.pointType === 'source' ? 'SUMBER' : 'BUANG') : fromSb.name) : fromId;
+                    const toName = toSb ? ('pointType' in toSb ? (toSb.pointType === 'source' ? 'SUMBER' : 'BUANG') : toSb.name) : toId;
                     return (
                       <span
                         key={idx}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold border border-primary/20"
                       >
-                        {fromSb?.name ?? fromId}
+                        {fromName}
                         <ArrowRight className="h-3 w-3" />
-                        {toSb?.name ?? toId}
+                        {toName}
                         {isBidirectional && (
                           <span className="ml-0.5 text-[9px] text-primary/60 font-normal">(2 arah)</span>
                         )}
@@ -1092,64 +2015,64 @@ export function MapPage() {
 
           {/* Rute Irigasi Paling Efektif */}
           <div className="border-t pt-6 mt-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-primary/10 p-2 rounded-lg">
-                <Route className="h-4 w-4 text-primary" />
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary/10 p-2 rounded-lg">
+                  <Route className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold tracking-tight">Rute Irigasi Paling Efektif</h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Rekomendasi urutan distribusi air berdasarkan efisiensi dan kondisi lapangan.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-base font-bold tracking-tight">Rute Irigasi Paling Efektif</h4>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Rekomendasi urutan distribusi air berdasarkan efisiensi dan kondisi lapangan.
-                </p>
-              </div>
+              <Button
+                onClick={handleRunFloydWarshall}
+                disabled={runningFloydWarshall || (subBlocks.length === 0 && irrigationPoints.length === 0)}
+                size="sm"
+                className="gap-1.5"
+              >
+                {runningFloydWarshall ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="h-3.5 w-3.5" />
+                    Jalankan Floyd-Warshall
+                  </>
+                )}
+              </Button>
             </div>
 
-            {loadingRoutes ? (
-              <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-                <Loader2 className="h-6 w-6 animate-spin text-primary mb-2" />
-                <span className="text-sm">Menghitung rute optimal...</span>
-              </div>
-            ) : irrigationRoutes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground border border-dashed rounded-xl bg-muted/20">
-                <TrendingUp className="h-8 w-8 opacity-30" />
-                <p className="text-sm font-semibold">Belum ada data rute irigasi</p>
-                <p className="text-xs opacity-60">Data akan muncul setelah endpoint tersedia.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {irrigationRoutes.map((route, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-4 p-4 rounded-xl border bg-card/50 hover:shadow-sm transition-shadow"
-                  >
-                    {/* Route info */}
-                    <div className="flex-1 min-w-0">
-                      <span className="font-semibold text-sm truncate">{route.routeName}</span>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {route.fromSubBlock} → {route.toSubBlock}
-                      </p>
-                      {route.notes && (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1 italic">{route.notes}</p>
-                      )}
-                    </div>
 
-                    {/* Metrics */}
-                    <div className="shrink-0 text-right space-y-0.5">
-                      <div className="flex items-center gap-1 justify-end">
-                        <TrendingUp className="h-3 w-3 text-emerald-500" />
-                        <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                          {route.weightScore}%
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">{route.estimatedDistance} m</p>
-                    </div>
-                  </div>
-                ))}
+            {/* Floyd-Warshall Multi-Target Graph Section */}
+            {loadingMatrix ? (
+              <div className="flex flex-col items-center justify-center py-6 text-muted-foreground border border-dashed rounded-xl bg-muted/10">
+                <Loader2 className="h-5 w-5 animate-spin text-primary mb-1.5" />
+                <span className="text-xs">Memuat grafik rute irigasi...</span>
               </div>
-            )}
+            ) : matrixResult && typeof matrixResult === 'object' && Array.isArray(matrixResult.routes) ? (
+              <IrrigationRouteGraph
+                matrixResult={matrixResult as MultiTargetResult}
+                subBlocks={subBlocks}
+                sourceIndex={sourceIndex}
+                setSourceIndex={setSourceIndex}
+                floydWarshallMatrix={floydWarshallMatrix}
+                irrigationPoints={irrigationPoints}
+              />
+            ) : matrixResult ? (
+              <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
+                <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>Hasil tersimpan dalam format lama. Jalankan Floyd-Warshall untuk memperbarui visualisasi.</span>
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
     </div>
   );
 }
+

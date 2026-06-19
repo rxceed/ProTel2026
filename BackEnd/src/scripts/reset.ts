@@ -39,6 +39,7 @@ async function reset() {
       DROP SCHEMA IF EXISTS drizzle CASCADE;
       DROP TABLE  IF EXISTS public.schema_migrations;
     `);
+    client.release();
 
     console.log('📄 Membaca folder database/migrations...');
     const migrationsFolder = path.join(__dirname, '../../database/migrations');
@@ -54,7 +55,6 @@ async function reset() {
     console.error('\n❌ Reset gagal:', err.message, '\n');
     process.exit(1);
   } finally {
-    client.release();
     await pool.end();
   }
 }

@@ -46,7 +46,7 @@ export function EntityDetailModal({ isOpen, onClose, title, data }: EntityDetail
     const initMap = async () => {
       let imageUrl: string | null = null;
       if (fieldData?.mapVisualUrl) {
-        imageUrl = await getCachedMapImageUrl(fieldData.mapVisualUrl);
+        imageUrl = await getCachedMapImageUrl(fieldData.mapVisualUrl, fieldData.name);
       }
 
       if (!active) return;
@@ -146,14 +146,30 @@ export function EntityDetailModal({ isOpen, onClose, title, data }: EntityDetail
 
         <div className="p-6 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-4">
-            {Object.entries(data).map(([key, value]) => (
-              <div key={key} className="border-b pb-2">
-                <p className="text-[10px] uppercase font-bold text-muted-foreground">{key.replace(/([A-Z])/g, ' $1')}</p>
-                <p className="text-sm font-medium">
-                  {typeof value === 'object' ? (value ? 'Object/Array' : 'null') : String(value)}
-                </p>
-              </div>
-            ))}
+            {Object.entries(data)
+              .filter(([key]) => key !== 'polygonGeom' && key !== 'centroid')
+              .map(([key, value]) => (
+                <div key={key} className="border-b pb-2">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">{key.replace(/([A-Z])/g, ' $1')}</p>
+                  <div className="text-sm font-medium">
+                    {Array.isArray(value) ? (
+                      value.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {value.map((item: any, i) => (
+                            <span key={i} className="inline-block bg-muted px-2 py-0.5 rounded text-xs font-mono">
+                              {typeof item === 'object' && item !== null ? (item.deviceCode || JSON.stringify(item)) : String(item)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : '-'
+                    ) : typeof value === 'object' ? (
+                      value ? 'Object/Array' : 'null'
+                    ) : (
+                      String(value ?? '-')
+                    )}
+                  </div>
+                </div>
+              ))}
           </div>
 
           {data.polygonGeom && (

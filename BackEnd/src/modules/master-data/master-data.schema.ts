@@ -41,6 +41,8 @@ export const CreateFieldSchema = z.object({
   decision_cycle_mode:  z.enum(['normal', 'siaga']).default('normal'),
   notes:                z.string().max(2000).optional(),
   assigned_file_name:   z.string().max(500).optional(),
+  irrigation_edges:     z.array(z.any()).optional().nullable(),
+  irrigation_nodes:     z.array(z.any()).optional().nullable(),
 });
 
 export const UpdateFieldSchema = CreateFieldSchema.partial();
@@ -84,6 +86,7 @@ export const CreateDeviceSchema = z.object({
   serial_number:   z.string().max(100).optional(),
   firmware_version:z.string().max(50).optional(),
   notes:           z.string().max(2000).optional(),
+  coordinate:      z.record(z.any()).optional().nullable(),
 });
 
 export const UpdateDeviceSchema = CreateDeviceSchema.partial();
@@ -109,11 +112,12 @@ export const CalibrateDeviceSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const CreateFlowPathSchema = z.object({
-  from_sub_block_id: z.string().uuid(),
-  to_sub_block_id:   z.string().uuid(),
-  flow_type:         z.enum(['natural', 'pipe', 'canal', 'pump']).default('natural'),
-  notes:             z.string().max(500).optional(),
+  flow_type:             z.enum(['natural', 'pipe', 'canal', 'pump']).default('natural'),
+  floyd_warshall_matrix: z.unknown().optional(),
+  notes:                 z.string().max(500).optional(),
 });
+
+export const UpdateFlowPathSchema = CreateFlowPathSchema.partial();
 
 // ---------------------------------------------------------------------------
 // Crop cycle schemas
@@ -159,3 +163,22 @@ export const CreateRuleProfileSchema = z.object({
 });
 
 export const UpdateRuleProfileSchema = CreateRuleProfileSchema.partial();
+
+// ---------------------------------------------------------------------------
+// Irrigation Point schemas
+// ---------------------------------------------------------------------------
+
+export const GeoJsonPointSchema = z.object({
+  type:        z.literal('Point'),
+  coordinates: z.tuple([z.number(), z.number()]),
+});
+
+export type GeoJsonPoint = z.infer<typeof GeoJsonPointSchema>;
+
+export const CreateIrrigationPointSchema = z.object({
+  point_type:       z.string().min(1).max(100),
+  coordinate_point: GeoJsonPointSchema.optional(),
+  elevation_m:      z.coerce.number().optional(),
+});
+
+export const UpdateIrrigationPointSchema = CreateIrrigationPointSchema.partial();

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { userFields } from '@/db/schema/mst';
+import { userFields, subBlocks, devices, flowPaths, irrigationPoints } from '@/db/schema/mst';
 import { AppError } from '@/middleware/error.middleware';
 import type { FieldRole, SystemRole } from '@/shared/types';
 
@@ -39,7 +39,62 @@ export function requireFieldAccess(minRole: FieldRole = 'viewer') {
         return;
       }
 
-      const fieldId = req.params['fieldId'] ?? req.params['id'];
+      let fieldId = req.params['fieldId'] ?? req.body?.field_id ?? req.body?.fieldId;
+
+      if (!fieldId) {
+        const id = req.params['id'];
+        if (id) {
+          const url = req.originalUrl;
+          if (url.includes('/sub-blocks/')) {
+            const [sb] = await db
+              .select({ fieldId: subBlocks.fieldId })
+              .from(subBlocks)
+              .where(eq(subBlocks.id, id))
+              .limit(1);
+            if (!sb) {
+              next(new AppError(404, 'SUB_BLOCK_NOT_FOUND', 'Petak tidak ditemukan'));
+              return;
+            }
+            fieldId = sb.fieldId;
+          } else if (url.includes('/devices/')) {
+            const [dev] = await db
+              .select({ fieldId: devices.fieldId })
+              .from(devices)
+              .where(eq(devices.id, id))
+              .limit(1);
+            if (!dev) {
+              next(new AppError(404, 'DEVICE_NOT_FOUND', 'Perangkat tidak ditemukan'));
+              return;
+            }
+            fieldId = dev.fieldId;
+          } else if (url.includes('/flow-paths/')) {
+            const [fp] = await db
+              .select({ fieldId: flowPaths.fieldId })
+              .from(flowPaths)
+              .where(eq(flowPaths.id, id))
+              .limit(1);
+            if (!fp) {
+              next(new AppError(404, 'FLOW_PATH_NOT_FOUND', 'Flow path tidak ditemukan'));
+              return;
+            }
+            fieldId = fp.fieldId;
+          } else if (url.includes('/irrigation-points/')) {
+            const [ip] = await db
+              .select({ fieldId: irrigationPoints.fieldId })
+              .from(irrigationPoints)
+              .where(eq(irrigationPoints.id, id))
+              .limit(1);
+            if (!ip) {
+              next(new AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan'));
+              return;
+            }
+            fieldId = ip.fieldId;
+          } else {
+            fieldId = id;
+          }
+        }
+      }
+
       if (!fieldId) {
         next(new AppError(400, 'FIELD_ID_REQUIRED', 'Field ID tidak ditemukan di request'));
         return;

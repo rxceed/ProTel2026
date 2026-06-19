@@ -5,6 +5,8 @@ import { validate } from '@/middleware/validate.middleware';
 import { successResponse } from '@/shared/utils/response.util';
 import { db } from '@/db/client';
 import { telemetryRecords, subBlockStates, subBlockCurrentStates } from '@/db/schema/trx';
+import { devices } from '@/db/schema/mst';
+import { AppError } from '@/middleware/error.middleware';
 import { eq, desc } from 'drizzle-orm';
 
 export const telemetryQueryRouter = Router();
@@ -129,6 +131,60 @@ telemetryQueryRouter.post(
         lastObservationAt:       body.lastObservationAt ? new Date(body.lastObservationAt) : undefined,
         sourceDeviceId:          body.sourceDeviceId,
         interpolationConfidence: body.interpolationConfidence?.toFixed(2),
+      })
+      .returning();
+
+    res.status(201).json(successResponse(inserted));
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Schema validasi untuk POST /telemetry/records
+// ---------------------------------------------------------------------------
+const InsertTelemetryRecordSchema = z.object({
+  device_code:    z.string().min(1),
+  water_level_cm: z.number().optional().nullable(),
+  temperature_c:  z.number().optional().nullable(),
+  humidity_pct:   z.number().optional().nullable(),
+});
+
+// ---------------------------------------------------------------------------
+// POST /telemetry/records
+//
+// Memasukkan data pembacaan telemetry baru secara manual/langsung
+// ---------------------------------------------------------------------------
+telemetryQueryRouter.post(
+  '/records',
+  requireAuth,
+  validate(InsertTelemetryRecordSchema),
+  h(async (req, res) => {
+    const body = req.body as z.infer<typeof InsertTelemetryRecordSchema>;
+
+    const [device] = await db
+      .select({
+        id: devices.id,
+        deviceCode: devices.deviceCode,
+        subBlockId: devices.subBlockId,
+      })
+      .from(devices)
+      .where(eq(devices.deviceCode, body.device_code))
+      .limit(1);
+
+    if (!device) {
+      throw new AppError(404, 'DEVICE_NOT_FOUND', `Device dengan kode ${body.device_code} tidak ditemukan`);
+    }
+
+    const [inserted] = await db
+      .insert(telemetryRecords)
+      .values({
+        eventTimestamp:  new Date(),
+        deviceId:        device.id,
+        deviceCode:      device.deviceCode,
+        subBlockId:      device.subBlockId,
+        waterLevelCm:    body.water_level_cm?.toString(),
+        temperatureC:    body.temperature_c?.toString(),
+        humidityPct:     body.humidity_pct?.toString(),
+        isValid:         true,
       })
       .returning();
 

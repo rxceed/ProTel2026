@@ -7,6 +7,7 @@ import {
   integer,
   numeric,
   jsonb,
+  json,
 } from 'drizzle-orm/pg-core';
 import { geometryPoint, geometryPolygon } from '../geometry';
 
@@ -71,6 +72,8 @@ export const fields = mst.table('fields', {
   mapVisualUrl:         text('map_visual_url'),
   mapBounds:            jsonb('map_bounds'),
   assignedFileName:     text('assigned_file_name'),
+  irrigationEdges:      json('irrigation_edges'),
+  irrigationNodes:      json('irrigation_nodes'),
   createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -112,13 +115,24 @@ export const subBlocks = mst.table('sub_blocks', {
 // mst.flow_paths
 // ---------------------------------------------------------------------------
 export const flowPaths = mst.table('flow_paths', {
+  id:                   uuid('id').primaryKey().defaultRandom(),
+  fieldId:              uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  flowType:             text('flow_type').notNull().default('natural'),
+  floydWarshallMatrix:  json('floyd_warshall_matrix'),
+  isActive:             boolean('is_active').notNull().default(true),
+  notes:                text('notes'),
+  createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// mst.irrigation_points
+// ---------------------------------------------------------------------------
+export const irrigationPoints = mst.table('irrigation_points', {
   id:               uuid('id').primaryKey().defaultRandom(),
-  fromSubBlockId:   uuid('from_sub_block_id').notNull().references(() => subBlocks.id, { onDelete: 'restrict' }),
-  toSubBlockId:     uuid('to_sub_block_id').notNull().references(() => subBlocks.id, { onDelete: 'restrict' }),
-  flowType:         text('flow_type').notNull().default('natural'),
-  isActive:         boolean('is_active').notNull().default(true),
-  notes:            text('notes'),
-  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  fieldId:          uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  pointType:        text('point_type').notNull(),
+  coordinatePoint:  geometryPoint('coordinate_point'),
+  elevationM:       numeric('elevation_m', { precision: 7, scale: 2 }),
 });
 
 // ---------------------------------------------------------------------------
@@ -141,6 +155,7 @@ export const devices = mst.table('devices', {
   lastSeenAt:       timestamp('last_seen_at', { withTimezone: true }),
   notes:            text('notes'),
   topic:            text('topic').notNull().default(''),
+  coordinate:       json('coordinate'),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -33,16 +33,30 @@ export interface EstimationResult {
  *   - 0.0 jika tidak ada tetangga dengan data
  */
 export async function estimateFromNeighbors(subBlockId: string): Promise<EstimationResult | null> {
-  // 1. Ambil flow_paths yang terhubung ke subBlock ini (sebagai from atau to)
-  const paths = await db.select({
-    fromId: flowPathsTable.fromSubBlockId,
-    toId:   flowPathsTable.toSubBlockId,
-  })
-    .from(flowPathsTable)
+  // 1. Dapatkan fieldId dari subBlockId
+  const [sb] = await db.select({ fieldId: subBlocksTable.fieldId })
+    .from(subBlocksTable).where(eq(subBlocksTable.id, subBlockId)).limit(1);
+  if (!sb) return null;
+
+  // 2. Ambil semua sub-blocks di field tersebut, diurutkan agar indeksnya cocok dengan matrix
+  const subBlocks = await db.select({ id: subBlocksTable.id })
+    .from(subBlocksTable)
+    .where(and(eq(subBlocksTable.fieldId, sb.fieldId), eq(subBlocksTable.isActive, true)))
+    .orderBy(subBlocksTable.displayOrder, subBlocksTable.name);
+
+  // 3. Ambil flow_path matrix untuk field
+  const [flowPath] = await db.select().from(flowPathsTable)
     .where(and(
+      eq(flowPathsTable.fieldId, sb.fieldId),
       eq(flowPathsTable.isActive, true),
-      sql`(${flowPathsTable.fromSubBlockId} = ${subBlockId} OR ${flowPathsTable.toSubBlockId} = ${subBlockId})`,
-    ));
+    ))
+    .limit(1);
+
+  if (!flowPath || !flowPath.floydWarshallMatrix) return null;
+
+  // 4. Rekonstruksi direct edges dan filter yang terhubung dengan subBlockId
+  const paths = getDirectEdgesFromMatrix(flowPath.floydWarshallMatrix, subBlocks)
+    .filter(p => p.fromId === subBlockId || p.toId === subBlockId);
 
   if (paths.length === 0) return null;
 
@@ -102,4 +116,38 @@ export async function estimateFromNeighbors(subBlockId: string): Promise<Estimat
     usedNeighborCount:       usable.length,
     usedNeighborIds:         usable.map(n => n.subBlockId),
   };
+}
+
+function getDirectEdgesFromMatrix(matrixJson: any, subBlocks: { id: string }[]): { fromId: string; toId: string }[] {
+  if (!matrixJson || typeof matrixJson !== 'object') return [];
+  
+  const successor = Array.isArray(matrixJson.successor)
+    ? matrixJson.successor
+    : Array.isArray(matrixJson.successors)
+    ? matrixJson.successors
+    : null;
+    
+  if (!successor || !Array.isArray(successor)) return [];
+  
+  const edges: { fromId: string; toId: string }[] = [];
+  
+  for (let u = 0; u < successor.length; u++) {
+    const row = successor[u];
+    if (!Array.isArray(row)) continue;
+    for (let v = 0; v < row.length; v++) {
+      const nextHop = row[v];
+      if (nextHop === v && u !== v) {
+        const fromSb = subBlocks[u];
+        const toSb = subBlocks[v];
+        if (fromSb && toSb) {
+          edges.push({
+            fromId: fromSb.id,
+            toId: toSb.id,
+          });
+        }
+      }
+    }
+  }
+  
+  return edges;
 }
