@@ -5,13 +5,9 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from titiler.core.factory import TilerFactory
-from titiler.core.errors import DEFAULT_STATUS_CODES, add_exception_handlers
-
 from app.config import get_settings
 from app.db import get_pool, close_pool
 from app.modules.decision_engine.router import router as decision_router
-from app.modules.cog_processor.router import router as cog_router
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -44,7 +40,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Starting Smart AWD Model Service [{settings.app_env}]...")
     await get_pool()           # Initialize DB connection pool
     logger.info("✓ Database pool ready")
-    logger.info("✓ TiTiler mounted at /tiles")
     logger.info(f"🚀 Model Service ready on port {settings.port}")
 
     yield
@@ -60,7 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Smart AWD Model Service",
-    description="Decision engine + COG tile server untuk Smart AWD DSS",
+    description="Decision engine untuk Smart AWD DSS",
     version="1.0.0",
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
@@ -79,15 +74,8 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# TiTiler — Cloud Optimized GeoTIFF tile server
-# Serve COG dari Cloudflare R2 sebagai XYZ map tiles
-#
-# Frontend (OpenLayers) memanggil:
-# GET /tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=s3://bucket/path/to/cog.tif
+# TiTiler dan COG Processor telah dihapus
 # ---------------------------------------------------------------------------
-cog_tiler = TilerFactory(router_prefix="/tiles")
-app.include_router(cog_tiler.router, prefix="/tiles", tags=["tiles"])
-add_exception_handlers(app, DEFAULT_STATUS_CODES)
 
 # ---------------------------------------------------------------------------
 # Custom module routers
@@ -96,11 +84,6 @@ app.include_router(
     decision_router,
     prefix="/evaluate",
     tags=["decision-engine"],
-)
-app.include_router(
-    cog_router,
-    prefix="/cog",
-    tags=["cog-processor"],
 )
 
 

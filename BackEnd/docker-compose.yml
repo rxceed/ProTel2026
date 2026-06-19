@@ -1,0 +1,20 @@
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16
+    container_name: smartawd-db
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=smartawd_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - smartawd-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smartawd_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  smartawd-data:

@@ -12,12 +12,7 @@ pydantic-settings==2.7.0
 # Database (async)
 asyncpg==0.30.0
 
-# Tile server (COG → XYZ tiles)
-titiler[full]==0.19.2
 
-# COG processing
-rio-cogeo==3.7.0
-rasterio==1.3.11
 
 # YAML rule loading
 pyyaml==6.0.2
