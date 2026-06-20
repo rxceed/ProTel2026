@@ -93,6 +93,7 @@ export async function runWaterRouting(
       id:          subBlocksTable.id,
       areaM2:      subBlocksTable.areaM2,
       elevationM:  subBlocksTable.elevationM,
+      elevationCalibration: subBlocksTable.elevationCalibration,
       centroidEwkt: sql<string>`ST_AsEWKT(${subBlocksTable.centroid})`,
     })
     .from(subBlocksTable)
@@ -201,7 +202,7 @@ export async function runWaterRouting(
       area:           parseFloat(sb.areaM2 ?? '100'),  // default 100m² jika null
       water_height:   waterHeightM,
       optimal_height: optimalHeightM,
-      elevation:      parseFloat(sb.elevationM ?? '0'),
+      elevation:      parseFloat(sb.elevationM ?? '0') + parseFloat(sb.elevationCalibration ?? '0'),
     };
   });
 

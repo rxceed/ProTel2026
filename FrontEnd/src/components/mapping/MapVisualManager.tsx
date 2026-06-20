@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Upload, Map as MapIcon, Check, Loader2, Video, ChevronDown, RefreshCw, Clapperboard, Globe, AlertTriangle } from 'lucide-react';
+import { Upload, Map as MapIcon, Check, Loader2, Video, ChevronDown, RefreshCw, Clapperboard, Globe, AlertTriangle, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/api/client';
 import { videoOpsApi, VideoEntry, ParsedVideoEntry, JobLogEntry } from '@/api/gisProc';
@@ -44,6 +44,12 @@ export function MapVisualManager({
   const [selectedVideoId, setSelectedVideoId] = useState<string>('');
   const [videosLoading, setVideosLoading] = useState(false);
   const [videosError, setVideosError] = useState<string | null>(null);
+
+  // SRT upload state
+  const [localSrtFile, setLocalSrtFile] = useState<File | null>(null);
+  const [uploadingSrt, setUploadingSrt] = useState(false);
+  const [uploadSrtError, setUploadSrtError] = useState<string | null>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
 
   // Parse options state
   const [frameIntervalSec, setFrameIntervalSec] = useState<number>(1);
@@ -201,6 +207,43 @@ export function MapVisualManager({
       setVideosError(err.response?.data?.message || err.message || 'Gagal memuat video');
     } finally {
       setVideosLoading(false);
+    }
+  };
+
+  const handleLocalSrtSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let file = e.target.files?.[0] ?? null;
+    const selectedVideo = videos.find((v) => v._id === selectedVideoId);
+    if (file && selectedVideo) {
+      const dotIndex = selectedVideo.filename.lastIndexOf('.');
+      const baseName = dotIndex !== -1 ? selectedVideo.filename.substring(0, dotIndex) : selectedVideo.filename;
+      file = new File([file], `${baseName}.srt`, { type: file.type });
+    }
+    setLocalSrtFile(file);
+    setUploadSrtError(null);
+  };
+
+  const handleUploadSrt = async () => {
+    const selectedVideo = videos.find((v) => v._id === selectedVideoId);
+    if (!localSrtFile || !selectedVideo) return;
+    setUploadingSrt(true);
+    setUploadSrtError(null);
+    try {
+      const meRes = await apiClient.get('/auth/me');
+      const ownerId: string = meRes.data.data.id;
+
+      const dotIndex = selectedVideo.filename.lastIndexOf('.');
+      const baseName = dotIndex !== -1 ? selectedVideo.filename.substring(0, dotIndex) : selectedVideo.filename;
+      const normalizedSrtFile = new File([localSrtFile], `${baseName}.srt`, { type: localSrtFile.type });
+
+      await videoOpsApi.updateSrt(selectedVideo._id, ownerId, normalizedSrtFile);
+      
+      const srtText = await normalizedSrtFile.text();
+      setVideos(prev => prev.map(v => v._id === selectedVideo._id ? { ...v, srtContent: srtText } : v));
+      setLocalSrtFile(null);
+    } catch (err: any) {
+      setUploadSrtError(err.response?.data?.message || err.message || 'Gagal mengunggah file SRT');
+    } finally {
+      setUploadingSrt(false);
     }
   };
 
@@ -437,13 +480,70 @@ export function MapVisualManager({
                   ? 'Tidak ada video tersedia'
                   : '-- Pilih sumber video --'}
               </option>
-              {videos.map((video) => (
+              {videos.filter((v) => v.filename.toLowerCase().endsWith('.mp4')).map((video) => (
                 <option key={video._id} value={video._id}>
                   {video.filename}
                 </option>
               ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          </div>
+        )}
+
+        {/* SRT Upload/Reupload option under video selection */}
+        {selectedVideoId && (
+          <div className="mt-2 space-y-2 border-t pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                File GPS SRT: {(() => {
+                  const selectedVideo = videos.find((v) => v._id === selectedVideoId);
+                  return selectedVideo?.srtContent ? (
+                    <span className="text-green-600 font-semibold">Tersedia</span>
+                  ) : (
+                    <span className="text-amber-600 font-semibold">Belum tersedia</span>
+                  );
+                })()}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs flex items-center gap-1.5"
+                onClick={() => srtInputRef.current?.click()}
+              >
+                Pilih File SRT
+              </Button>
+              <span className="text-xs text-muted-foreground truncate max-w-[150px]">
+                {localSrtFile ? localSrtFile.name : 'Pilih file .srt'}
+              </span>
+              {localSrtFile && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={handleUploadSrt}
+                  disabled={uploadingSrt}
+                >
+                  {uploadingSrt ? <Loader2 className="h-3 w-3 animate-spin" /> : (() => {
+                    const selectedVideo = videos.find((v) => v._id === selectedVideoId);
+                    return selectedVideo?.srtContent ? 'Reupload' : 'Upload';
+                  })()}
+                </Button>
+              )}
+            </div>
+            <input
+              ref={srtInputRef}
+              type="file"
+              accept=".srt"
+              className="hidden"
+              onChange={handleLocalSrtSelect}
+            />
+            {uploadSrtError && <p className="text-[10px] text-destructive">{uploadSrtError}</p>}
           </div>
         )}
 
@@ -599,12 +699,24 @@ export function MapVisualManager({
 
                   const frameInterval = Math.round(frameIntervalSec * selectedVideo.fps);
 
+                  let srtFileToSend: File | null = null;
+                  if (localSrtFile) {
+                    const dotIndex = selectedVideo.filename.lastIndexOf('.');
+                    const baseName = dotIndex !== -1 ? selectedVideo.filename.substring(0, dotIndex) : selectedVideo.filename;
+                    srtFileToSend = new File([localSrtFile], `${baseName}.srt`, { type: localSrtFile.type });
+                  } else if (selectedVideo.srtContent) {
+                    const dotIndex = selectedVideo.filename.lastIndexOf('.');
+                    const baseName = dotIndex !== -1 ? selectedVideo.filename.substring(0, dotIndex) : selectedVideo.filename;
+                    srtFileToSend = new File([selectedVideo.srtContent], `${baseName}.srt`, { type: 'application/x-subrip' });
+                  }
+
                   const res = await videoOpsApi.parseVideo({
                     owner_id: ownerId,
                     filename: selectedVideo.filename,
                     frame_interval: frameInterval,
                     start: startSec,
                     end: endSec,
+                    srt_file: srtFileToSend,
                   });
 
                   // Assign assigned_file_name in field record

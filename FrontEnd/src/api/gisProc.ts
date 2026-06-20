@@ -16,6 +16,7 @@ export interface VideoEntry {
   fps: number;
   resolution: VideoResolution;
   codec: string;
+  srtContent?: string | null;
 }
 
 interface GetVideosResponse {
@@ -30,6 +31,7 @@ export interface ParseVideoRequest {
   frame_interval: number;
   start: number;
   end: number | null;
+  srt_file?: File | null;
 }
 
 export interface ImageFrame {
@@ -83,10 +85,13 @@ interface GetJobLogsResponse {
 }
 
 export const videoOpsApi = {
-  uploadVideo: (ownerId: string, file: File) => {
+  uploadVideo: (ownerId: string, file: File, srtFile?: File | null) => {
     const formData = new FormData();
     formData.append('owner_id', ownerId);
     formData.append('file', file);
+    if (srtFile) {
+      formData.append('srt_file', srtFile);
+    }
 
     return gisProcClient.post('/api/video-ops/upload', formData, {
       headers: {
@@ -100,7 +105,35 @@ export const videoOpsApi = {
   },
 
   parseVideo: (body: ParseVideoRequest) => {
-    return gisProcClient.post('/api/video-ops/parse', body);
+    const formData = new FormData();
+    formData.append('owner_id', body.owner_id);
+    formData.append('filename', body.filename);
+    formData.append('frame_interval', body.frame_interval.toString());
+    formData.append('start', body.start.toString());
+    if (body.end !== null && body.end !== undefined) {
+      formData.append('end', body.end.toString());
+    }
+    if (body.srt_file) {
+      formData.append('srt_file', body.srt_file);
+    }
+
+    return gisProcClient.post('/api/video-ops/parse', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  updateSrt: (videoId: string, ownerId: string, srtFile: File) => {
+    const formData = new FormData();
+    formData.append('owner_id', ownerId);
+    formData.append('srt_file', srtFile);
+
+    return gisProcClient.put(`/api/video-ops/videos/${videoId}/srt`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
   },
 
   getParsedVideos: (ownerId: string, filename: string) => {

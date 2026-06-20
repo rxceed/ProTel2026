@@ -10,6 +10,8 @@ export const SensorDataSchema = z.object({
   humidity_pct:   z.number().optional(),
   battery_pct:    z.number().min(0).max(100).optional(),
   signal_rssi:    z.number().int().optional(),
+  pressure:       z.number().optional(),
+  pressure_hpa:   z.number().optional(),
 }).passthrough(); // simpan field extra di raw_data
 
 export const ReadingSchema = z.object({

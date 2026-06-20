@@ -57,13 +57,14 @@ export const AssignUserFieldSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const CreateSubBlockSchema = z.object({
-  name:          z.string().min(1).max(200),
-  code:          z.string().max(20).optional(),
-  polygon_geom:  GeoJsonPolygonSchema,
-  elevation_m:   z.coerce.number().optional(),
-  soil_type:     z.string().max(100).optional(),
-  display_order: z.coerce.number().int().min(0).default(0),
-  notes:         z.string().max(2000).optional(),
+  name:                  z.string().min(1).max(200),
+  code:                  z.string().max(20).optional(),
+  polygon_geom:          GeoJsonPolygonSchema,
+  elevation_m:           z.coerce.number().optional(),
+  elevation_calibration: z.coerce.number().optional(),
+  soil_type:             z.string().max(100).optional(),
+  display_order:         z.coerce.number().int().min(0).default(0),
+  notes:                 z.string().max(2000).optional(),
 });
 
 export const UpdateSubBlockSchema = CreateSubBlockSchema.partial();
@@ -80,13 +81,14 @@ export const ImportSubBlocksSchema = z.object({
 
 export const CreateDeviceSchema = z.object({
   device_code:     z.string().min(1).max(100),
-  device_type:     z.enum(['awd_water_level', 'weather_station', 'multi_sensor']).default('awd_water_level'),
+  device_type:     z.enum(['sensor', 'station', 'awd_water_level', 'weather_station', 'multi_sensor']).default('sensor'),
   connection_type: z.enum(['lorawan', 'nb_iot', 'gsm', 'wifi', 'manual']).default('lorawan'),
   hardware_model:  z.string().max(100).optional(),
   serial_number:   z.string().max(100).optional(),
   firmware_version:z.string().max(50).optional(),
   notes:           z.string().max(2000).optional(),
   coordinate:      z.record(z.any()).optional().nullable(),
+  parent_station:  z.string().optional().nullable(),
 });
 
 export const UpdateDeviceSchema = CreateDeviceSchema.partial();

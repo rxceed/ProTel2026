@@ -247,6 +247,7 @@ function parseSubBlockNumerics(sb: RawSubBlock) {
     ...sb,
     areaM2:    sb.areaM2    != null ? parseFloat(sb.areaM2)    : null,
     elevationM: sb.elevationM != null ? parseFloat(sb.elevationM) : null,
+    elevationCalibration: sb.elevationCalibration != null ? parseFloat(sb.elevationCalibration) : null,
   };
 }
 
@@ -262,6 +263,7 @@ export const subBlocksService = {
       areaM2: subBlocksTable.areaM2,
       centroid: sql<string | null>`ST_AsGeoJSON(${subBlocksTable.centroid})`,
       elevationM: subBlocksTable.elevationM,
+      elevationCalibration: subBlocksTable.elevationCalibration,
       soilType: subBlocksTable.soilType,
       displayOrder: subBlocksTable.displayOrder,
       isActive: subBlocksTable.isActive,
@@ -307,6 +309,7 @@ export const subBlocksService = {
       areaM2: subBlocksTable.areaM2,
       centroid: sql<string | null>`ST_AsGeoJSON(${subBlocksTable.centroid})`,
       elevationM: subBlocksTable.elevationM,
+      elevationCalibration: subBlocksTable.elevationCalibration,
       soilType: subBlocksTable.soilType,
       displayOrder: subBlocksTable.displayOrder,
       isActive: subBlocksTable.isActive,
@@ -342,13 +345,14 @@ export const subBlocksService = {
     
     const [inserted] = await db.insert(subBlocksTable).values({
       fieldId,
-      name:         input.name,
-      code:         input.code,
-      polygonGeom:  geomJson,
-      elevationM:   input.elevation_m?.toString(),
-      soilType:     input.soil_type,
-      displayOrder: input.display_order,
-      notes:        input.notes,
+      name:                 input.name,
+      code:                 input.code,
+      polygonGeom:          geomJson,
+      elevationM:           input.elevation_m?.toString(),
+      elevationCalibration: input.elevation_calibration?.toString(),
+      soilType:             input.soil_type,
+      displayOrder:         input.display_order,
+      notes:                input.notes,
     }).returning();
 
     if (!inserted) throw new AppError(500, 'CREATE_FAILED', 'Gagal membuat sub-block');
@@ -361,13 +365,14 @@ export const subBlocksService = {
 
   async update(subBlockId: string, input: UpdateSubBlockInput) {
     const setParts: Record<string, unknown> = { updatedAt: new Date() };
-    if (input.name          !== undefined) setParts['name']          = input.name;
-    if (input.code          !== undefined) setParts['code']          = input.code;
-    if (input.elevation_m   !== undefined) setParts['elevationM']    = input.elevation_m;
-    if (input.soil_type     !== undefined) setParts['soilType']      = input.soil_type;
-    if (input.display_order !== undefined) setParts['displayOrder']  = input.display_order;
-    if (input.notes         !== undefined) setParts['notes']         = input.notes;
-    if (input.polygon_geom  !== undefined) setParts['polygonGeom']   = JSON.stringify(input.polygon_geom);
+    if (input.name                  !== undefined) setParts['name']                  = input.name;
+    if (input.code                  !== undefined) setParts['code']                  = input.code;
+    if (input.elevation_m           !== undefined) setParts['elevationM']            = input.elevation_m;
+    if (input.elevation_calibration !== undefined) setParts['elevationCalibration']  = input.elevation_calibration?.toString();
+    if (input.soil_type             !== undefined) setParts['soilType']              = input.soil_type;
+    if (input.display_order         !== undefined) setParts['displayOrder']          = input.display_order;
+    if (input.notes                 !== undefined) setParts['notes']                 = input.notes;
+    if (input.polygon_geom          !== undefined) setParts['polygonGeom']           = JSON.stringify(input.polygon_geom);
 
     const [updated] = await db.update(subBlocksTable)
       .set(setParts as Parameters<typeof db.update>[0] extends never ? never : Record<string, unknown>)
@@ -448,6 +453,7 @@ export const devicesService = {
         lastSeenAt: devicesTable.lastSeenAt,
         notes: devicesTable.notes,
         topic: devicesTable.topic,
+        parentStation: devicesTable.parentStation,
         coordinate: devicesTable.coordinate,
         createdAt: devicesTable.createdAt,
         updatedAt: devicesTable.updatedAt,
@@ -480,6 +486,7 @@ export const devicesService = {
       lastSeenAt: devicesTable.lastSeenAt,
       notes: devicesTable.notes,
       topic: devicesTable.topic,
+      parentStation: devicesTable.parentStation,
       coordinate: devicesTable.coordinate,
       createdAt: devicesTable.createdAt,
       updatedAt: devicesTable.updatedAt,
@@ -509,6 +516,7 @@ export const devicesService = {
       lastSeenAt: devicesTable.lastSeenAt,
       notes: devicesTable.notes,
       topic: devicesTable.topic,
+      parentStation: devicesTable.parentStation,
       coordinate: devicesTable.coordinate,
       createdAt: devicesTable.createdAt,
       updatedAt: devicesTable.updatedAt,
@@ -531,19 +539,29 @@ export const devicesService = {
       status:          'active',
       notes:           input.notes,
       coordinate:      input.coordinate,
+      parentStation:   input.device_type === 'sensor' ? input.parent_station : null,
     }).returning();
     return dev!;
   },
 
   async update(deviceId: string, input: Partial<CreateDeviceInput>) {
+    let parentStationValue: string | null | undefined = undefined;
+    if (input.device_type === 'station') {
+      parentStationValue = null;
+    } else if (input.parent_station !== undefined) {
+      parentStationValue = input.parent_station;
+    }
+
     const [updated] = await db.update(devicesTable)
       .set({
+        ...(input.device_code      !== undefined && { deviceCode: input.device_code }),
         ...(input.device_type      !== undefined && { deviceType: input.device_type }),
         ...(input.connection_type  !== undefined && { connectionType: input.connection_type }),
         ...(input.hardware_model   !== undefined && { hardwareModel: input.hardware_model }),
         ...(input.firmware_version !== undefined && { firmwareVersion: input.firmware_version }),
         ...(input.notes            !== undefined && { notes: input.notes }),
         ...(input.coordinate       !== undefined && { coordinate: input.coordinate }),
+        ...(parentStationValue     !== undefined && { parentStation: parentStationValue }),
         updatedAt: new Date(),
       })
       .where(eq(devicesTable.id, deviceId))
@@ -576,6 +594,27 @@ export const devicesService = {
     await db.update(devicesTable)
       .set({ subBlockId: input.sub_block_id, updatedAt: new Date() })
       .where(eq(devicesTable.id, deviceId));
+
+    // Perform immediate auto-calibration if latest pressure record exists for this device
+    const [latestRecord] = await db.select()
+      .from(telemetryRecordsTable)
+      .where(and(
+        eq(telemetryRecordsTable.deviceId, deviceId),
+        sql`${telemetryRecordsTable.pressure} IS NOT NULL`
+      ))
+      .orderBy(desc(telemetryRecordsTable.eventTimestamp))
+      .limit(1);
+
+    if (latestRecord && latestRecord.pressure) {
+      const pressureVal = parseFloat(latestRecord.pressure.toString());
+      const elevationVal = 44330 * (1 - Math.pow(pressureVal / 1013.25, 0.1903));
+      await db.update(subBlocksTable)
+        .set({
+          elevationCalibration: elevationVal.toFixed(2),
+          updatedAt: new Date(),
+        })
+        .where(eq(subBlocksTable.id, input.sub_block_id));
+    }
   },
 
   async unassign(deviceId: string, unassignedBy: string) {

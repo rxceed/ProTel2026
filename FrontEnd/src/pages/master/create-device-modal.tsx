@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { apiClient, gisProcClient } from '@/api/client';
 
 interface DeviceFormData {
   device_code: string;
+  device_type: string;
   hardware_model: string;
   serial_number: string;
   firmware_version: string;
@@ -22,6 +23,7 @@ interface CreateDeviceModalProps {
 export function CreateDeviceModal({ isOpen, fieldId, initialData, onClose, onSuccess }: CreateDeviceModalProps) {
   const [formData, setFormData] = useState<DeviceFormData>({
     device_code: initialData?.deviceCode || '',
+    device_type: initialData?.deviceType || 'sensor',
     hardware_model: initialData?.hardwareModel || '',
     serial_number: initialData?.serialNumber || '',
     firmware_version: initialData?.firmwareVersion || '1.0.0',
@@ -29,6 +31,46 @@ export function CreateDeviceModal({ isOpen, fieldId, initialData, onClose, onSuc
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const [stations, setStations] = useState<any[]>([]);
+  const [selectedParentId, setSelectedParentId] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState('');
+
+  // Sync initialData with state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        device_code: initialData?.deviceCode || '',
+        device_type: initialData?.deviceType || 'sensor',
+        hardware_model: initialData?.hardwareModel || '',
+        serial_number: initialData?.serialNumber || '',
+        firmware_version: initialData?.firmwareVersion || '1.0.0',
+        notes: initialData?.notes || ''
+      });
+      const deviceCode = initialData?.deviceCode || '';
+      const lastUnderscoreIndex = deviceCode.lastIndexOf('_');
+      const indexPart = lastUnderscoreIndex !== -1 ? deviceCode.substring(lastUnderscoreIndex + 1) : '';
+      setSelectedParentId(initialData?.parentStation || '');
+      setSelectedIndex(indexPart ? (parseInt(indexPart, 10) + 1).toString() : '');
+      setError('');
+    }
+  }, [isOpen, initialData]);
+
+  // Fetch available stations in the field
+  useEffect(() => {
+    if (!isOpen || !fieldId) return;
+    const fetchStations = async () => {
+      try {
+        const response = await apiClient.get(`/fields/${fieldId}/devices`);
+        const allDevices = response.data.data;
+        const fieldStations = allDevices.filter((d: any) => d.deviceType === 'station');
+        setStations(fieldStations);
+      } catch (err) {
+        console.error("Gagal memuat daftar stasiun", err);
+      }
+    };
+    fetchStations();
+  }, [isOpen, fieldId]);
 
   if (!isOpen) return null;
 
@@ -45,11 +87,24 @@ export function CreateDeviceModal({ isOpen, fieldId, initialData, onClose, onSuc
     setError('');
     setLoading(true);
 
+    const selectedParentStation = stations.find(st => st.id === selectedParentId);
+    const parentCode = selectedParentStation ? selectedParentStation.deviceCode : '';
+
+    const payload = {
+      ...formData,
+      device_code: formData.device_type === 'sensor'
+        ? `${parentCode}_${parseInt(selectedIndex, 10) - 1}`
+        : formData.device_code,
+      parent_station: formData.device_type === 'sensor' && selectedParentId
+        ? selectedParentId
+        : null
+    };
+
     try {
       if (initialData?.id) {
-        await apiClient.patch(`/devices/${initialData.id}`, formData);
+        await apiClient.patch(`/devices/${initialData.id}`, payload);
       } else {
-        const response = await apiClient.post(`/fields/${fieldId}/devices`, formData);
+        const response = await apiClient.post(`/fields/${fieldId}/devices`, payload);
         const topic = response.data?.data?.topic;
         if (topic) {
           await gisProcClient.post('/api/mqtt/subscribe', { topic });
@@ -83,19 +138,70 @@ export function CreateDeviceModal({ isOpen, fieldId, initialData, onClose, onSuc
             </div>
           )}
 
+          {formData.device_type !== 'sensor' && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Device Code *</label>
+              <input 
+                required
+                name="device_code"
+                value={formData.device_code}
+                onChange={handleChange}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                placeholder="Cth: AWD-SEN-001"
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
-            <label className="text-sm font-medium">Device Code *</label>
-            <input 
-              required
-              name="device_code"
-              value={formData.device_code}
+            <label className="text-sm font-medium">Device Type *</label>
+            <select
+              name="device_type"
+              value={formData.device_type}
               onChange={handleChange}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              placeholder="Cth: AWD-SEN-001"
-            />
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="sensor">Sensor</option>
+              <option value="station">Station</option>
+            </select>
           </div>
 
+          {formData.device_type === 'sensor' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Parent Station *</label>
+                <select
+                  required
+                  value={selectedParentId}
+                  onChange={(e) => {
+                    setSelectedParentId(e.target.value);
+                    if (!e.target.value) setSelectedIndex('');
+                  }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">Pilih Station...</option>
+                  {stations.map(st => (
+                    <option key={st.id} value={st.id}>{st.deviceCode}</option>
+                  ))}
+                </select>
+              </div>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Sensor Index *</label>
+                <select
+                  required
+                  disabled={!selectedParentId}
+                  value={selectedIndex}
+                  onChange={(e) => setSelectedIndex(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                >
+                  <option value="">Pilih Index...</option>
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map(idx => (
+                    <option key={idx} value={idx}>{idx}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

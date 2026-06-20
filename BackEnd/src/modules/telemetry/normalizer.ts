@@ -7,8 +7,10 @@ export interface RawSensorData {
   water_level_cm?: number;
   temperature_c?:  number;
   humidity_pct?:   number;
-  battery_pct?:   number;
+  battery_pct?:    number;
   signal_rssi?:    number;
+  pressure?:       number;
+  pressure_hpa?:   number;
   [key: string]:   unknown; // extra fields dipertahankan di raw_data
 }
 
@@ -27,6 +29,7 @@ export interface NormalizedReading {
   humidity_pct:       number | null;
   battery_pct:        number | null;
   signal_rssi:        number | null;
+  pressure:           number | null;
   is_valid:           boolean;
   validation_notes:   string | null;
 }
@@ -64,6 +67,8 @@ export function normalizeReading(
   const humidity = raw.humidity_pct !== undefined ? r2(raw.humidity_pct  + offsets.humidityOffsetPct)  : null;
   const battery  = raw.battery_pct ?? null;
   const rssi     = raw.signal_rssi ?? null;
+  const press    = raw.pressure ?? raw.pressure_hpa ?? null;
+  const pressure = press !== null ? r2(press) : null;
 
   // Validate — hanya water_level yang mem-fail is_valid
   let is_valid = true;
@@ -91,6 +96,7 @@ export function normalizeReading(
     humidity_pct:       humidity,
     battery_pct:        battery,
     signal_rssi:        rssi,
+    pressure,
     is_valid,
     validation_notes: issues.length > 0 ? issues.join('; ') : null,
   };

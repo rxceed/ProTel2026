@@ -194,6 +194,7 @@ export const telemetryRecords = trx.table(
     temperatureC:     numeric('temperature_c', { precision: 5, scale: 2 }),
     humidityPct:      numeric('humidity_pct', { precision: 5, scale: 2 }),
     batteryPct:       numeric('battery_pct', { precision: 5, scale: 2 }),
+    pressure:         numeric('pressure', { precision: 7, scale: 2 }),
     signalRssi:       integer('signal_rssi'),
     calibrationId:    uuid('calibration_id'),
     waterLevelRawCm:  numeric('water_level_raw_cm', { precision: 7, scale: 2 }),

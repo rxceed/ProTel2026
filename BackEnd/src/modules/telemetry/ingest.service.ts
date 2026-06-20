@@ -5,6 +5,7 @@ import {
   devices as devicesTable,
   sensorCalibrations as sensorCalibrationsTable,
   alertConfigs as alertConfigsTable,
+  subBlocks as subBlocksTable,
 } from '@/db/schema/mst';
 import {
   telemetryBatches as batchesTable,
@@ -119,6 +120,7 @@ export async function processBatch(payload: BatchPayload): Promise<BatchResult> 
           temperatureC:    norm.temperature_c?.toString(),
           humidityPct:     norm.humidity_pct?.toString(),
           batteryPct:      norm.battery_pct?.toString(),
+          pressure:        norm.pressure?.toString(),
           signalRssi:      norm.signal_rssi,
           calibrationId:   cal?.id,
           waterLevelRawCm: norm.water_level_raw_cm?.toString(),
@@ -147,6 +149,17 @@ export async function processBatch(payload: BatchPayload): Promise<BatchResult> 
             waterLevelCm: norm.water_level_cm, batteryPct: norm.battery_pct,
             configs: alertConfigs,
           });
+        }
+
+        // 5g. Automatically update sub-block elevation calibration if pressure telemetry is present
+        if (norm.pressure !== null && device.subBlockId) {
+          const elevationVal = 44330 * (1 - Math.pow(norm.pressure / 1013.25, 0.1903));
+          await db.update(subBlocksTable)
+            .set({
+              elevationCalibration: elevationVal.toFixed(2),
+              updatedAt: new Date(),
+            })
+            .where(eq(subBlocksTable.id, device.subBlockId));
         }
 
         processed++;

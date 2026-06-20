@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Loader2, Video } from 'lucide-react';
+import { X, Loader2, Video, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/api/client';
 import { videoOpsApi } from '@/api/gisProc';
@@ -30,7 +30,9 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [srtFile, setSrtFile] = useState<File | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
 
   useEffect(() => {
@@ -71,7 +73,13 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
 
       if (videoFile && currentUserId) {
         try {
-          await videoOpsApi.uploadVideo(currentUserId, videoFile);
+          let normalizedSrtFile = srtFile;
+          if (normalizedSrtFile) {
+            const dotIndex = videoFile.name.lastIndexOf('.');
+            const baseName = dotIndex !== -1 ? videoFile.name.substring(0, dotIndex) : videoFile.name;
+            normalizedSrtFile = new File([normalizedSrtFile], `${baseName}.srt`, { type: normalizedSrtFile.type });
+          }
+          await videoOpsApi.uploadVideo(currentUserId, videoFile, normalizedSrtFile);
         } catch (videoErr: any) {
           setError(videoErr.response?.data?.message || videoErr.message || 'Lahan tersimpan, tetapi gagal mengupload video');
           onSuccess();
@@ -91,6 +99,16 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setVideoFile(file);
+  };
+
+  const handleSrtSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let file = e.target.files?.[0] ?? null;
+    if (file && videoFile) {
+      const dotIndex = videoFile.name.lastIndexOf('.');
+      const baseName = dotIndex !== -1 ? videoFile.name.substring(0, dotIndex) : videoFile.name;
+      file = new File([file], `${baseName}.srt`, { type: file.type });
+    }
+    setSrtFile(file);
   };
 
   return (
@@ -198,6 +216,34 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
               accept="video/mp4"
               className="hidden"
               onChange={handleVideoSelect}
+            />
+          </div>
+
+          {/* SRT Upload */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">GPS File (.srt) - Opsional</label>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => srtInputRef.current?.click()}
+                className="flex items-center gap-2"
+                disabled={!videoFile}
+                title={!videoFile ? "Pilih video terlebih dahulu" : undefined}
+              >
+                <FileText className="h-4 w-4" />
+                Upload SRT
+              </Button>
+              <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                {srtFile ? srtFile.name : 'Belum ada file dipilih'}
+              </span>
+            </div>
+            <input
+              ref={srtInputRef}
+              type="file"
+              accept=".srt"
+              className="hidden"
+              onChange={handleSrtSelect}
             />
           </div>
 
