@@ -7,7 +7,15 @@ from app.modules.decision_engine.schemas import (
     DssAction,
 )
 from app.modules.decision_engine.scorer import score_and_rank
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+# ---------------------------------------------------------------------------
+# Konfigurasi Agronomi & Operasional
+# ---------------------------------------------------------------------------
+NIGHT_BLOCK_START_HOUR = 17  # 17:00 (5 Sore)
+NIGHT_BLOCK_END_HOUR = 5     # 05:00 (5 Pagi)
+DRAIN_TOLERANCE_CM = 5.0     # Batas maklum kelebihan air sebelum DRAIN (Histeresis)
 
 async def evaluate_field(request: EvaluateRequest) -> list[RecommendationOutput]:
     """
@@ -32,6 +40,19 @@ def _evaluate_sub_block(
     """Evaluasi satu sub-block dan kembalikan rekomendasi mentah."""
 
     rule = sub_block.rule_profile
+
+    # ── 0.5 Cek Snooze (Jeda Alarm Fisik) ────────────────────────────────────
+    for flag in getattr(sub_block, 'management_flags', []):
+        if flag.event_type == 'snooze_dss':
+            return _build_recommendation(
+                sub_block=sub_block,
+                rec_type=RecommendationType.OBSERVE,
+                template_code="SNOOZE_DSS",
+                command_text="Sistem dijeda sementara oleh pengguna (Snooze).",
+                reason="Pemeliharaan fisik atau perbaikan pematang sedang berlangsung.",
+                confidence=ConfidenceLevel.HIGH,
+                priority_score=0.0,
+            )
 
     # ── 1. Cek weather warnings yang override DSS ────────────────────────────
     for warning in request.active_warnings:
@@ -164,7 +185,19 @@ def _evaluate_sub_block(
 
         # 5. Normal
         else:
-            if is_imminent or is_heavy or is_sustained or total_mm >= 2.0:
+            tz = ZoneInfo("Asia/Jakarta")
+            now_hour = datetime.now(tz).hour
+            is_afternoon = 13 <= now_hour < 17
+
+            if is_afternoon and is_heavy:
+                return _build_recommendation(
+                    sub_block=sub_block, rec_type=RecommendationType.DRAIN,
+                    template_code="DRAIN_PREPARE_RAIN",
+                    command_text=f"Prediksi BMKG: Hujan lebat nanti malam. Segera buka pembuangan (DRAIN) untuk mengosongkan sawah sebagai ruang tampung.",
+                    reason=f"Kuras antisipasi: Hujan {upcoming_event.peak_intensity_mm:.0f}mm/3jam akan datang di malam hari.",
+                    confidence=ConfidenceLevel.HIGH, priority_score=0.8,
+                )
+            elif is_imminent or is_heavy or is_sustained or total_mm >= 2.0:
                 return _build_recommendation(
                     sub_block=sub_block, rec_type=RecommendationType.OBSERVE,
                     template_code="HOLD_RAIN_FORECAST",
@@ -175,8 +208,23 @@ def _evaluate_sub_block(
 
     # ── 5. Evaluasi level air vs threshold ──────────────────────────────────
 
-    # Level kritis — drought alert
+    # Cek jam operasional malam (WIB)
+    tz = ZoneInfo("Asia/Jakarta")
+    now_hour = datetime.now(tz).hour
+    is_night = now_hour >= NIGHT_BLOCK_START_HOUR or now_hour < NIGHT_BLOCK_END_HOUR
+
+    # Level kritis — drought alert (Abaikan jam malam karena darurat)
     if rule.drought_alert_cm is not None and wl <= rule.drought_alert_cm:
+        if getattr(request.field_context, 'is_source_depleted', False):
+            return _build_recommendation(
+                sub_block=sub_block,
+                rec_type=RecommendationType.OBSERVE,
+                template_code="DROUGHT_OVERRIDE",
+                command_text="Air sawah kritis. (IRIGASI DIBATALKAN: Petani melaporkan sumber sungai kering total).",
+                reason="Sistem membatalkan perintah irigasi darurat karena sumber air utama dilaporkan kering total.",
+                confidence=ConfidenceLevel.HIGH,
+                priority_score=0.2,
+            )
         return _build_recommendation(
             sub_block=sub_block,
             rec_type=RecommendationType.IRRIGATE,
@@ -187,26 +235,47 @@ def _evaluate_sub_block(
             priority_score=_calc_priority(wl, rule.awd_lower_threshold_cm, boost=2.0),
         )
 
-    # Di bawah threshold AWD → irigasi
+    # Di bawah threshold AWD → irigasi (Terkena blokir jam malam)
     if wl <= rule.awd_lower_threshold_cm:
-        return _build_recommendation(
-            sub_block=sub_block,
-            rec_type=RecommendationType.IRRIGATE,
-            template_code="IRRIGATE_THRESHOLD",
-            command_text=f"Segera irigasi Kotak {sub_block.code or sub_block.id[:8]} — level air {wl:.1f} cm.",
-            reason=f"Level air {wl:.1f} cm melewati threshold irigasi {rule.awd_lower_threshold_cm:.1f} cm.",
-            confidence=ConfidenceLevel.HIGH,
-            priority_score=_calc_priority(wl, rule.awd_lower_threshold_cm, boost=1.0),
-        )
+        if getattr(request.field_context, 'is_source_depleted', False):
+            return _build_recommendation(
+                sub_block=sub_block,
+                rec_type=RecommendationType.OBSERVE,
+                template_code="DROUGHT_OVERRIDE",
+                command_text="Air sawah di bawah batas. (IRIGASI DIBATALKAN: Sumber pusat kering).",
+                reason="Sistem membatalkan perintah irigasi karena sumber air utama dilaporkan kering total.",
+                confidence=ConfidenceLevel.HIGH,
+                priority_score=0.2,
+            )
+        if is_night:
+            return _build_recommendation(
+                sub_block=sub_block,
+                rec_type=RecommendationType.OBSERVE,
+                template_code="DELAY_NIGHT_IRRIGATION",
+                command_text="Tunda pengisian air — hari sudah gelap.",
+                reason=f"Peringatan Jam Malam: Tunda pengisian air hingga besok pagi untuk mencegah banjir karena sawah ditinggal tidur.",
+                confidence=ConfidenceLevel.HIGH,
+                priority_score=0.2,
+            )
+        else:
+            return _build_recommendation(
+                sub_block=sub_block,
+                rec_type=RecommendationType.IRRIGATE,
+                template_code="IRRIGATE_THRESHOLD",
+                command_text=f"Segera irigasi Kotak {sub_block.code or sub_block.id[:8]} — level air {wl:.1f} cm.",
+                reason=f"Level air {wl:.1f} cm melewati threshold irigasi {rule.awd_lower_threshold_cm:.1f} cm.",
+                confidence=ConfidenceLevel.HIGH,
+                priority_score=_calc_priority(wl, rule.awd_lower_threshold_cm, boost=1.0),
+            )
 
-    # Di atas target → drain
-    if wl >= rule.awd_upper_target_cm:
+    # Di atas target → drain (Dengan Toleransi)
+    if wl >= rule.awd_upper_target_cm + DRAIN_TOLERANCE_CM:
         return _build_recommendation(
             sub_block=sub_block,
             rec_type=RecommendationType.DRAIN,
             template_code="DRAIN_EXCESS",
-            command_text=f"Kurangi air Kotak {sub_block.code or sub_block.id[:8]} — genangan {wl:.1f} cm.",
-            reason=f"Level air {wl:.1f} cm melebihi target maksimum {rule.awd_upper_target_cm:.1f} cm.",
+            command_text=f"Kurangi air Kotak {sub_block.code or sub_block.id[:8]} — genangan {wl:.1f} cm melampaui batas toleransi.",
+            reason=f"Level air {wl:.1f} cm melebihi target maksimum ({rule.awd_upper_target_cm:.1f} cm) + toleransi ({DRAIN_TOLERANCE_CM} cm).",
             confidence=ConfidenceLevel.MEDIUM,
             priority_score=0.5,
         )
@@ -216,8 +285,8 @@ def _evaluate_sub_block(
         sub_block=sub_block,
         rec_type=RecommendationType.MAINTAIN_DRY,
         template_code="MAINTAIN_AWD_DRY",
-        command_text=f"Pertahankan kondisi saat ini ({wl:.1f} cm) — AWD dry period.",
-        reason=f"Level air {wl:.1f} cm dalam rentang AWD ({rule.awd_lower_threshold_cm:.1f} – {rule.awd_upper_target_cm:.1f} cm).",
+        command_text=f"Target air ideal tercapai ({wl:.1f} cm). Pastikan seluruh pematang tertutup rapat.",
+        reason=f"Level air {wl:.1f} cm dalam rentang AWD aman ({rule.awd_lower_threshold_cm:.1f} – {rule.awd_upper_target_cm:.1f} + {DRAIN_TOLERANCE_CM} cm).",
         confidence=ConfidenceLevel.HIGH,
         priority_score=0.3,
     )

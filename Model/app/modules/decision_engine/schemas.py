@@ -116,6 +116,7 @@ class WeatherWarning(BaseModel):
 class FieldContext(BaseModel):
     water_source_type: str = "irrigated"
     operator_count:    int = 1
+    is_source_depleted: bool = False
 
 
 class EvaluateRequest(BaseModel):

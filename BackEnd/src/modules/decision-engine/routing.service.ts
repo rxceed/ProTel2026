@@ -7,6 +7,7 @@ import {
   cropCycles as cropCyclesTable,
   embankments as embankmentsTable,
   fields as fieldsTable,
+  irrigationPoints as irrigationPointsTable,
 } from '@/db/schema/mst';
 import {
   subBlockCurrentStates as currentStatesTable,
@@ -81,8 +82,10 @@ export async function runWaterRouting(
     .filter(r => r.recommendation_type === 'irrigate')
     .sort((a, b) => b.priority_score - a.priority_score);
 
-  if (sources.length === 0 || targets.length === 0) {
-    logger.info(logCtx, 'Water routing skipped — no DRAIN/IRRIGATE imbalance in this cycle');
+  // We don't skip if there's no imbalance anymore, because a DRAIN can go to an irrigation drain point,
+  // and an IRRIGATE can come from an irrigation source point.
+  if (sources.length === 0 && targets.length === 0) {
+    logger.info(logCtx, 'Water routing skipped — no recommendations to process');
     return;
   }
 
@@ -98,10 +101,25 @@ export async function runWaterRouting(
     .from(subBlocksTable)
     .where(and(eq(subBlocksTable.fieldId, fieldId), eq(subBlocksTable.isActive, true)));
 
-  if (subBlockRows.length < 2) {
-    logger.warn(logCtx, 'Water routing skipped — fewer than 2 active sub-blocks');
+  if (subBlockRows.length < 1) {
+    logger.warn(logCtx, 'Water routing skipped — no active sub-blocks');
     return;
   }
+
+  // Load irrigation points
+  const ipRows = await db
+    .select({
+      id: irrigationPointsTable.id,
+      pointType: irrigationPointsTable.pointType,
+      elevationM: irrigationPointsTable.elevationM,
+      assignedSubBlocks: irrigationPointsTable.assignedSubBlocks,
+      centroidEwkt: sql<string>`ST_AsEWKT(${irrigationPointsTable.coordinatePoint})`,
+    })
+    .from(irrigationPointsTable)
+    .where(eq(irrigationPointsTable.fieldId, fieldId));
+
+  const sourcePoints = ipRows.filter(ip => ip.pointType === 'source');
+  const drainPoints = ipRows.filter(ip => ip.pointType === 'drain');
 
   // Load embankments for this field to derive sub-block connections
   const embankmentRows = await db
@@ -182,32 +200,49 @@ export async function runWaterRouting(
   // ── 4. Bangun UUID ↔ index mapping ────────────────────────────────────────
   const uuidToIdx = new Map<string, number>();
   const idxToUuid = new Map<number, string>();
-  subBlockRows.forEach((sb, idx) => {
-    uuidToIdx.set(sb.id, idx);
-    idxToUuid.set(idx, sb.id);
+  const uuidToCode = new Map<string, string>();
+
+  subBlockRows.forEach((sb) => {
+    uuidToCode.set(sb.id, sb.code || sb.id.substring(0,8));
+  });
+
+  const allNodes = [...subBlockRows, ...ipRows];
+  
+  allNodes.forEach((n, idx) => {
+    uuidToIdx.set(n.id, idx);
+    idxToUuid.set(idx, n.id);
   });
 
   // Build nodes[] payload untuk Python
-  const nodes = subBlockRows.map(sb => {
-    const state = stateMap.get(sb.id);
+  const nodes = allNodes.map(n => {
+    if ('pointType' in n) {
+      return {
+        area: 0.0001,
+        water_height: fieldAvgM,
+        optimal_height: fieldAvgM,
+        elevation: parseFloat(n.elevationM ?? '0'),
+      };
+    }
+
+    const state = stateMap.get(n.id);
     const waterRes = state
       ? resolveWaterHeight(state, fieldAvgM)
       : { waterHeightM: fieldAvgM, level: 3 as const };
 
     const waterHeightM = waterRes?.waterHeightM ?? fieldAvgM;
-    const optimalHeightM = resolveOptimalHeight(sb.id, cycleMap, ruleMap, defaultRule ?? null);
+    const optimalHeightM = resolveOptimalHeight(n.id, cycleMap, ruleMap, defaultRule ?? null);
 
     return {
-      area: parseFloat(sb.areaM2 ?? '100'),  // default 100m² jika null
+      area: parseFloat(n.areaM2 ?? '100'),
       water_height: waterHeightM,
       optimal_height: optimalHeightM,
-      elevation: parseFloat(sb.elevationM ?? '0'),
+      elevation: parseFloat(n.elevationM ?? '0'),
     };
   });
 
   // Build edges[] payload untuk Python (u, v, centroid_u, centroid_v)
   const edges: Array<{ u: number; v: number; centroid_u: string; centroid_v: string }> = [];
-  const sbEwktMap = new Map(subBlockRows.map(sb => [sb.id, sb.centroidEwkt]));
+  const sbEwktMap = new Map(allNodes.map(n => [n.id, n.centroidEwkt]));
 
   for (const conn of derivedConnections) {
     const u = uuidToIdx.get(conn.from);
@@ -218,6 +253,25 @@ export async function runWaterRouting(
     if (u === undefined || v === undefined || !cu || !cv) continue;
     edges.push({ u, v, centroid_u: cu, centroid_v: cv });
   }
+
+  // Add edges for irrigation points to their assigned sub-blocks
+  ipRows.forEach(ip => {
+    const ipIdx = uuidToIdx.get(ip.id);
+    const ipEwkt = sbEwktMap.get(ip.id);
+    if (ipIdx === undefined || !ipEwkt) return;
+
+    (ip.assignedSubBlocks || []).forEach(sbId => {
+      const sbIdx = uuidToIdx.get(sbId);
+      const sbEwkt = sbEwktMap.get(sbId);
+      if (sbIdx === undefined || !sbEwkt) return;
+
+      if (ip.pointType === 'source') {
+        edges.push({ u: ipIdx, v: sbIdx, centroid_u: ipEwkt, centroid_v: sbEwkt });
+      } else if (ip.pointType === 'drain') {
+        edges.push({ u: sbIdx, v: ipIdx, centroid_u: sbEwkt, centroid_v: ipEwkt });
+      }
+    });
+  });
 
   if (edges.length === 0) {
     logger.warn(logCtx, 'Water routing skipped — no valid edges could be built');
@@ -255,87 +309,143 @@ export async function runWaterRouting(
     return;
   }
 
-  // ── 6. Pilih pasangan source-target prioritas tertinggi ───────────────────
-  const source = sources[0]!;
-  const target = targets[0]!;
+  // ── 6. Process routing for each IRRIGATE and DRAIN recommendation ────────────
 
-  const srcIdx = uuidToIdx.get(source.sub_block_id);
-  const tgtIdx = uuidToIdx.get(target.sub_block_id);
+  for (const target of targets) {
+    const tgtIdx = uuidToIdx.get(target.sub_block_id);
+    if (tgtIdx === undefined) continue;
 
-  if (srcIdx === undefined || tgtIdx === undefined) {
-    logger.warn({ ...logCtx, source: source.sub_block_id, target: target.sub_block_id },
-      'Water routing — source or target not found in sub-block index');
-    return;
-  }
+    let bestSrcIdx = -1;
+    let minWeight = Infinity;
+    let bestSourceId = '';
 
-  if (dist[srcIdx]?.[tgtIdx] === null || dist[srcIdx]?.[tgtIdx] === undefined) {
-    logger.warn({ ...logCtx, srcIdx, tgtIdx },
-      'Water routing — no reachable path from source (DRAIN) to target (IRRIGATE)');
-    return;
-  }
-
-  // ── 7. Panggil POST /api/floydwarshall/matrix untuk rute detail ───────────
-  let routePath: number[] | null;
-  let routeWeight: number | null;
-
-  try {
-    const matRes = await fetch(`${gisUrl}/api/floydwarshall/matrix`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        matrix: dist,
-        successor,
-        source: srcIdx,
-        target: tgtIdx,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!matRes.ok) {
-      const body = await matRes.text();
-      throw new Error(`Floyd-Warshall /matrix returned ${matRes.status}: ${body.slice(0, 200)}`);
+    for (const srcPoint of sourcePoints) {
+      const sIdx = uuidToIdx.get(srcPoint.id);
+      if (sIdx !== undefined && dist[sIdx]?.[tgtIdx] !== null) {
+        const w = dist[sIdx][tgtIdx] as number;
+        if (w < minWeight) {
+          minWeight = w;
+          bestSrcIdx = sIdx;
+          bestSourceId = srcPoint.id;
+        }
+      }
     }
 
-    const matResult = await matRes.json() as { path: number[] | null; weight: number | null };
-    routePath = matResult.path;
-    routeWeight = matResult.weight;
-  } catch (err) {
-    logger.error({ err, ...logCtx }, 'Floyd-Warshall /matrix call failed — routing aborted');
-    return;
+    for (const srcSb of sources) {
+      const sIdx = uuidToIdx.get(srcSb.sub_block_id);
+      if (sIdx !== undefined && dist[sIdx]?.[tgtIdx] !== null) {
+        const w = dist[sIdx][tgtIdx] as number;
+        if (w < minWeight) {
+          minWeight = w;
+          bestSrcIdx = sIdx;
+          bestSourceId = srcSb.sub_block_id;
+        }
+      }
+    }
+
+    if (bestSrcIdx === -1) continue;
+
+    try {
+      const matRes = await fetch(`${gisUrl}/api/floydwarshall/matrix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matrix: dist, successor, source: bestSrcIdx, target: tgtIdx }),
+      });
+      if (!matRes.ok) continue;
+
+      const matResult = await matRes.json() as { path: number[] | null; weight: number | null };
+      if (matResult.path) {
+        const routeUUIDs = matResult.path.map(idx => idxToUuid.get(idx)).filter(Boolean);
+        const targetRec = recMap.get(target.sub_block_id);
+        if (targetRec) {
+          const isSourcePoint = sourcePoints.some(sp => sp.id === bestSourceId);
+          let newCommandText = targetRec.commandText;
+          const tgtCode = uuidToCode.get(target.sub_block_id);
+          const srcCode = uuidToCode.get(bestSourceId);
+
+          if (isSourcePoint) {
+            newCommandText = `Buka pematang (sumber utama) untuk mengairi Kotak ${tgtCode}`;
+          } else if (srcCode) {
+            newCommandText = `Buka pematang antara Kotak ${srcCode} dan Kotak ${tgtCode} untuk mengalirkan air`;
+          }
+
+          await db.update(recsTable)
+            .set({ routePathIds: routeUUIDs as object, routingScore: matResult.weight?.toFixed(4), fromSubBlockId: bestSourceId, commandText: newCommandText })
+            .where(eq(recsTable.id, targetRec.id));
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Matrix fetch failed');
+    }
   }
 
-  if (!routePath || routePath.length === 0) {
-    logger.warn({ ...logCtx, srcIdx, tgtIdx }, 'Water routing — empty path returned');
-    return;
+  for (const source of sources) {
+    const srcIdx = uuidToIdx.get(source.sub_block_id);
+    if (srcIdx === undefined) continue;
+
+    let bestTgtIdx = -1;
+    let minWeight = Infinity;
+    let bestTargetId = '';
+
+    for (const drainPoint of drainPoints) {
+      const tIdx = uuidToIdx.get(drainPoint.id);
+      if (tIdx !== undefined && dist[srcIdx]?.[tIdx] !== null) {
+        const w = dist[srcIdx][tIdx] as number;
+        if (w < minWeight) {
+          minWeight = w;
+          bestTgtIdx = tIdx;
+          bestTargetId = drainPoint.id;
+        }
+      }
+    }
+
+    for (const tgtSb of targets) {
+      const tIdx = uuidToIdx.get(tgtSb.sub_block_id);
+      if (tIdx !== undefined && dist[srcIdx]?.[tIdx] !== null) {
+        const w = dist[srcIdx][tIdx] as number;
+        if (w < minWeight) {
+          minWeight = w;
+          bestTgtIdx = tIdx;
+          bestTargetId = tgtSb.sub_block_id;
+        }
+      }
+    }
+
+    if (bestTgtIdx === -1) continue;
+
+    try {
+      const matRes = await fetch(`${gisUrl}/api/floydwarshall/matrix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matrix: dist, successor, source: srcIdx, target: bestTgtIdx }),
+      });
+      if (!matRes.ok) continue;
+
+      const matResult = await matRes.json() as { path: number[] | null; weight: number | null };
+      if (matResult.path) {
+        const routeUUIDs = matResult.path.map(idx => idxToUuid.get(idx)).filter(Boolean);
+        const sourceRec = recMap.get(source.sub_block_id);
+        if (sourceRec) {
+          const isDrainPoint = drainPoints.some(dp => dp.id === bestTargetId);
+          let newCommandText = sourceRec.commandText;
+          const srcCode = uuidToCode.get(source.sub_block_id);
+          const tgtCode = uuidToCode.get(bestTargetId);
+
+          if (isDrainPoint) {
+            newCommandText = `Buka pematang (pembuangan luar) untuk membuang genangan dari Kotak ${srcCode}`;
+          } else if (tgtCode) {
+            newCommandText = `Buka pematang antara Kotak ${srcCode} dan Kotak ${tgtCode} untuk membuang genangan`;
+          }
+
+          await db.update(recsTable)
+            .set({ routePathIds: routeUUIDs as object, routingScore: matResult.weight?.toFixed(4), toSubBlockId: bestTargetId, commandText: newCommandText })
+            .where(eq(recsTable.id, sourceRec.id));
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Matrix fetch failed');
+    }
   }
 
-  // ── 8. Konversi path indeks → UUID ────────────────────────────────────────
-  const routeUUIDs = routePath.map(idx => idxToUuid.get(idx)).filter((id): id is string => !!id);
-
-  // ── 9. Update irrigation_recommendations baris IRRIGATE target ────────────
-  const targetRec = recMap.get(target.sub_block_id);
-  if (!targetRec) {
-    logger.warn({ ...logCtx, targetSubBlock: target.sub_block_id },
-      'Water routing — target recommendation row not found in DB');
-    return;
-  }
-
-  await db.update(recsTable)
-    .set({
-      routePathIds: routeUUIDs as unknown as object,
-      routingScore: routeWeight?.toFixed(4),
-      fromSubBlockId: source.sub_block_id,
-    })
-    .where(eq(recsTable.id, targetRec.id));
-
-  logger.info(
-    {
-      ...logCtx,
-      source: source.sub_block_id,
-      target: target.sub_block_id,
-      routeSteps: routeUUIDs.length,
-      routingScore: routeWeight,
-    },
-    '✅ Water routing complete — recommendation enriched',
-  );
+  logger.info({ ...logCtx }, '✅ Water routing complete — recommendation enriched');
 }
