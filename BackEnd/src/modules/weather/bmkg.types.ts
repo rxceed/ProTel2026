@@ -57,6 +57,48 @@ export interface ParsedForecastSlot {
 }
 
 // ---------------------------------------------------------------------------
+// Structured weather analysis types (for DSS payload)
+// ---------------------------------------------------------------------------
+
+/** Satu slot waktu 3-jaman yang telah di-normalisasi dari raw BMKG (12 jam ke depan) */
+export interface WeatherSlot {
+  valid_from:   string;   // ISO 8601 WIB (+07:00)
+  valid_until:  string;   // ISO 8601 WIB (+07:00)
+  tp_mm:        number;   // Total Precipitation mm (field `tp` dari BMKG)
+  weather_desc: string;   // e.g. "Hujan Ringan"
+  weather_code: number | null;
+  is_wet:       boolean;  // true jika tp_mm >= RAIN_THRESHOLD (2 mm)
+}
+
+/**
+ * Satu "Kejadian Hujan" (Rain Event) — kumpulan slot berurutan yang semuanya wet.
+ * Menjawab: kapan? seberapa lama? seberapa lebat?
+ */
+export interface RainEvent {
+  starts_at:         string;  // ISO 8601 WIB, kapan event mulai
+  ends_at:           string;  // ISO 8601 WIB, kapan event selesai (akhir slot terakhir)
+  hours_until_rain:  number;  // jam dari sekarang sampai event mulai (0 jika sedang berlangsung)
+  duration_hours:    number;  // total durasi event dalam jam
+  total_mm:          number;  // akumulasi tp dalam event ini saja (bukan 12 jam)
+  peak_intensity_mm: number;  // nilai tp tertinggi dalam event
+  intensity_label:   'light' | 'moderate' | 'heavy'; // < 2mm, 2–8mm, ≥ 8mm (based on peak)
+}
+
+/**
+ * Hasil lengkap analisa cuaca untuk 12 jam ke depan.
+ * Disimpan di kolom `full_response_json` di tabel weather_forecast_snapshots
+ * dan dikirimkan ke DSS Python sebagai payload `weather`.
+ */
+export interface WeatherAnalysis {
+  fetched_at:           string;      // Waktu fetch dari BMKG
+  adm4_code:            string;      // Kode wilayah adm4 BMKG
+  window_hours:         number;      // Selalu 12
+  slots:                WeatherSlot[]; // Array slot (max 4 slot × 3 jam = 12 jam)
+  rain_events:          RainEvent[];   // Kejadian hujan terdeteksi (bisa kosong)
+  next_clear_window_at: string | null; // Kapan slot kering berikutnya (null jika semua basah)
+}
+
+// ---------------------------------------------------------------------------
 // Weather code → BMKG category mapping
 // ---------------------------------------------------------------------------
 const WEATHER_CATEGORIES: Record<number, string> = {

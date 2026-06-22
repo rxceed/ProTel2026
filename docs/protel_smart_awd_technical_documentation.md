@@ -38,9 +38,9 @@ Bagaimana perangkat mendeteksi air?
 
 ### Alur 3: Decision Pipeline (Kompilasi ke Rekomendasi)
 Bagaimana sistem berpikir untuk irigasi?
-1. **Cron Job (Setiap 10 Menit):** *State Builder* di BE berjalan secara _background_. Ia mengambil data sensor terbaru, meresolusinya (*Fresh, Stale, No Data*), dan melakukan interpolasi matematis untuk menebak kondisi air di petak yang sensornya mati.
-2. **Cron Job (Setiap 30 Menit):** BE mengambil semua state petak sawah, aturan AWD saat ini, dan menarik peringatan badai/prakiraan hujan dari **BMKG API**.
-3. BE memaketkan ini ke dalam format JSON besar dan menembakkannya (HTTP POST) ke **Model Service (DSS Engine)**.
+1. **Cron Job (Setiap 10 & 15 Menit):** *State Builder* di BE berjalan setiap 10 menit untuk mengambil data sensor terbaru dan melakukan interpolasi. Sementara itu, *Stale Flag* berjalan setiap 15 menit untuk mendeteksi sensor mati.
+2. **Cron Job (Setiap 3 Jam):** BE memiliki jadwal independen untuk menyinkronkan data prakiraan hujan dari **BMKG API** agar server pihak ketiga tidak *overload*.
+3. **Cron Job (Setiap 30 Menit):** BE menjalankan *Decision Cycle*. Ia mengambil semua state petak sawah, aturan AWD saat ini, dan data BMKG terbaru dari database, kemudian memaketkannya ke dalam format JSON besar dan menembakkannya (HTTP POST) ke **Model Service (DSS Engine)**.
 4. **Python DSS Engine** melakukan evaluasi hierarki secara *Black Box*:
    - Jika badai/hujan deras: **SKIP** (Tunda irigasi agar sawah tidak tenggelam).
    - Jika data sensor kosong: **NO_DATA** (Jangan bertindak buta).

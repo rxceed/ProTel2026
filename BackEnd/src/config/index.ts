@@ -41,6 +41,9 @@ const envSchema = z.object({
 
   // MQTT
   MQTT_URL: z.string().url().default('mqtt://localhost:1883'),
+
+  // BMKG
+  BMKG_BASE_URL: z.string().url().default('https://api.bmkg.go.id/publik/prakiraan-cuaca'),
 });
 
 const _parsed = envSchema.safeParse(process.env);

@@ -88,8 +88,18 @@ class SubBlockInput(BaseModel):
     flow_paths:        list[FlowPath] = []
 
 
+class RainEvent(BaseModel):
+    starts_at:          str
+    ends_at:            str
+    hours_until_rain:   float
+    duration_hours:     int
+    total_mm:           float
+    peak_intensity_mm:  float
+    intensity_label:    str
+
 class WeatherContext(BaseModel):
-    precipitation_mm:  Optional[float] = None
+    rain_events:       list[RainEvent] = []
+    peak_intensity_mm: Optional[float] = None
     bmkg_category:     Optional[str] = None
     temperature_c:     Optional[float] = None
     humidity_pct:      Optional[float] = None
@@ -106,6 +116,7 @@ class WeatherWarning(BaseModel):
 class FieldContext(BaseModel):
     water_source_type: str = "irrigated"
     operator_count:    int = 1
+    is_source_depleted: bool = False
 
 
 class EvaluateRequest(BaseModel):
