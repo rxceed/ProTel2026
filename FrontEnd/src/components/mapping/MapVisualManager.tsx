@@ -179,7 +179,10 @@ export function MapVisualManager({
         'x-original-height',
         'x-original-width',
         'x-transform',
-        'x-width'
+        'x-width',
+        'max-resolution',
+        'max_resolution',
+        'x-max-resolution'
       ];
       
       const savedData: Record<string, string> = { fieldName };
@@ -197,6 +200,10 @@ export function MapVisualManager({
         console.log("[MapVisualManager] Saving map headers to localStorage for field:", fieldName, savedData);
         localStorage.setItem(`map_headers_${fieldName}`, JSON.stringify(savedData));
         localStorage.setItem(fieldName, JSON.stringify(savedData));
+        
+        apiClient.patch(`/fields/${fieldId}`, { map_headers: savedData })
+          .then(() => console.log("[MapVisualManager] Map headers successfully saved to database"))
+          .catch(err => console.error("[MapVisualManager] Failed to save map headers to database", err));
       } else {
         console.warn("[MapVisualManager] No target headers found in response headers. Not saving to localStorage.");
       }

@@ -1,7 +1,7 @@
 import { db } from '@/db/client';
 import { agronomicTreatments } from '@/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
-import { AppError } from '@/shared/utils/error.util';
+import { AppError } from '@/middleware/error.middleware';
 
 export class AgronomicTreatmentsService {
   /**

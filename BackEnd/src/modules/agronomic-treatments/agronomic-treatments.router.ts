@@ -3,7 +3,7 @@ import { validate } from '@/middleware/validate.middleware';
 import { requireAuth } from '@/middleware/auth.middleware';
 import { createTreatmentSchema } from './agronomic-treatments.schema';
 import { agronomicTreatmentsService } from './agronomic-treatments.service';
-import { AppError } from '@/shared/utils/error.util';
+import { AppError } from '@/middleware/error.middleware';
 
 export const agronomicTreatmentsRouter = Router();
 

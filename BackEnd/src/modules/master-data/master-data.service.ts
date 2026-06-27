@@ -129,6 +129,7 @@ export const fieldsService = {
         notes:                  input.notes,
         mapVisualUrl:           `${GISPROC_API_BASE_URI}/webodm/display?project_name=${createdByUserId}&task_name=${input.name}&asset_type=orthophoto.tif`,
         assignedFileName:       input.assigned_file_name,
+        mapHeaders:             input.map_headers,
         irrigationEdges:        input.irrigation_edges,
         irrigationNodes:        input.irrigation_nodes,
       })
@@ -159,6 +160,7 @@ export const fieldsService = {
         ...(input.is_source_depleted    !== undefined && { isSourceDepleted: input.is_source_depleted }),
         ...(input.notes                 !== undefined && { notes: input.notes }),
         ...(input.assigned_file_name    !== undefined && { assignedFileName: input.assigned_file_name }),
+        ...(input.map_headers           !== undefined && { mapHeaders: input.map_headers }),
         ...(input.irrigation_edges      !== undefined && { irrigationEdges: input.irrigation_edges }),
         ...(input.irrigation_nodes      !== undefined && { irrigationNodes: input.irrigation_nodes }),
         updatedAt: new Date(),
@@ -926,7 +928,7 @@ async function calculateAssignedSubBlocksForPoint(fieldId: string, coordinatePoi
   .where(and(
     eq(embankmentsTable.fieldId, fieldId),
     eq(embankmentsTable.isActive, true),
-    sql`ST_Intersects(${embankmentsTable.polygonGeom}::geometry, ST_GeomFromGeoJSON(${geomJson}))`
+    sql`ST_Intersects(ST_SetSRID(${embankmentsTable.polygonGeom}::geometry, 4326), ST_GeomFromGeoJSON(${geomJson}))`
   ));
 
   for (const emb of intersectingEmbankments) {
@@ -942,7 +944,7 @@ async function calculateAssignedSubBlocksForPoint(fieldId: string, coordinatePoi
   .where(and(
     eq(subBlocksTable.fieldId, fieldId),
     eq(subBlocksTable.isActive, true),
-    sql`ST_Intersects(${subBlocksTable.polygonGeom}::geometry, ST_GeomFromGeoJSON(${geomJson}))`
+    sql`ST_Intersects(ST_SetSRID(${subBlocksTable.polygonGeom}::geometry, 4326), ST_GeomFromGeoJSON(${geomJson}))`
   ));
 
   intersectingSubBlocks.forEach(row => subBlockIds.add(row.id));

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X, Loader2, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { apiClient } from '@/api/client';
+import { apiClient, gisProcClient } from '@/api/client';
 import { Map, Check, Layers } from 'lucide-react';
 import { SubBlockMapEditor } from '@/components/mapping/SubBlockMapEditor';
 import { useEffect } from 'react';
@@ -22,111 +22,152 @@ interface CreateSubBlockModalProps {
   onSuccess: () => void;
 }
 
-async function calculateAverageElevation(polygonGeom: any, fieldName: string): Promise<number | null> {
-  console.log("[MapElevation] calculateAverageElevation starting for field:", fieldName);
+async function fetchGeoreferencePoints(fieldData: any): Promise<any[]> {
+  if (!fieldData || !fieldData.name) return [];
+  const fieldName = fieldData.name;
+  
+  // 1. Try to read from localStorage
+  let georeferenceStr = localStorage.getItem(`${fieldName}_georeference`);
+  if (georeferenceStr) {
+    try {
+      const parsed = JSON.parse(georeferenceStr);
+      if (Array.isArray(parsed.points)) return parsed.points;
+    } catch (e) {}
+  }
+  
+  // 2. Fallback to localStorage keys for georeference metadata
+  const geoDataStr = localStorage.getItem(fieldName) || localStorage.getItem(`map_headers_${fieldName}`);
+  if (!geoDataStr) {
+    console.warn(`[MapElevation] No georeferencing metadata found in localStorage for: ${fieldName}`);
+    return [];
+  }
+  
   try {
-    if (!polygonGeom) {
-      console.warn("[MapElevation] polygonGeom is empty");
-      return null;
+    const geoData = JSON.parse(geoDataStr);
+    const x_crs = geoData['x_crs'] || geoData['x-crs'] || '';
+    const x_bounds = geoData['x_bounds'] || geoData['x-bounds'] || '';
+    const x_transform = geoData['x_transform'] || geoData['x-transform'] || '';
+    const max_resolution = geoData['max_resolution'] || geoData['max-resolution'] || '';
+    
+    let projectId = '';
+    const mapUrl = fieldData.mapVisualUrl;
+    if (mapUrl) {
+      const match = mapUrl.match(/[?&]project_name=([^&]+)/);
+      if (match) {
+        projectId = decodeURIComponent(match[1]);
+      }
     }
-    if (!fieldName) {
-      console.warn("[MapElevation] fieldName is empty");
+    
+    if (!projectId) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        projectId = user.id;
+      }
+    }
+    
+    if (!projectId) {
+      const authRes = await apiClient.get('/auth/me');
+      projectId = authRes.data?.data?.id;
+    }
+    
+    if (!projectId) return [];
+    
+    const res = await gisProcClient.get(`/webodm/projects/${projectId}/tasks/${fieldName}/dtm`, {
+      params: {
+        max_resolution,
+        x_crs,
+        x_bounds,
+        x_transform
+      }
+    });
+    
+    if (res.data && Array.isArray(res.data.points)) {
+      localStorage.setItem(`${fieldName}_georeference`, JSON.stringify(res.data));
+      return res.data.points;
+    }
+  } catch (err) {
+    console.error(`[MapElevation] Failed to fetch georeference DTM for ${fieldName}:`, err);
+  }
+  
+  return [];
+}
+
+async function calculateAverageElevation(polygonGeom: any, fieldData: any): Promise<number | null> {
+  console.log("[MapElevation] calculateAverageElevation starting for fieldData:", fieldData?.name);
+  try {
+    if (!polygonGeom || !fieldData) {
       return null;
     }
     
     // Parse polygonGeom if it's a string
     const geom = typeof polygonGeom === 'string' ? JSON.parse(polygonGeom) : polygonGeom;
-    console.log("[MapElevation] Parsed geometry:", geom);
     if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) {
-      console.warn("[MapElevation] Geometry is not a valid Polygon or lacks coordinates");
       return null;
     }
     
     const coordinates = geom.coordinates[0] as [number, number][];
-    console.log("[MapElevation] Polygon coordinates (first ring):", coordinates);
+    const points = await fetchGeoreferencePoints(fieldData);
     
-    // Fetch georeferencing points from localStorage
-    let georeferenceStr = localStorage.getItem(`${fieldName}_georeference`);
-    console.log(`[MapElevation] Attempting to load localStorage key: ${fieldName}_georeference. Found:`, !!georeferenceStr);
-    
-    if (!georeferenceStr) {
-      // Try to find any key ending in _georeference as a fallback
-      console.log("[MapElevation] Doing fallback search for keys ending in _georeference in localStorage...");
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.toLowerCase().endsWith('_georeference')) {
-          console.log(`[MapElevation] Found fallback key: ${key}`);
-          georeferenceStr = localStorage.getItem(key);
-          break;
-        }
-      }
+    if (points.length === 0) {
+      return null;
     }
     
-    if (!georeferenceStr) {
-      console.log("[MapElevation] No georeferencing data found in localStorage. Attempting to fetch from /georeference.json fallback...");
+    // 1. Calculate centroid of the polygon coordinates (geographic lon/lat)
+    let sumLon = 0;
+    let sumLat = 0;
+    coordinates.forEach(([lon, lat]) => {
+      sumLon += lon;
+      sumLat += lat;
+    });
+    const cx = sumLon / coordinates.length;
+    const cy = sumLat / coordinates.length;
+    
+    // 2. Convert geographic centroid [cx, cy] to pixel coordinates [qx, qy]
+    const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
+    const lon_min = bounds[0][1];
+    const lon_max = bounds[1][1];
+    const lat_max = bounds[0][0];
+    const lat_min = bounds[1][0];
+    
+    const fieldHeaderStr = localStorage.getItem(fieldData.name) || localStorage.getItem(`map_headers_${fieldData.name}`);
+    let imageWidth = 1000;
+    let imageHeight = 1000;
+    if (fieldHeaderStr) {
       try {
-        const fetchRes = await fetch('/georeference.json');
-        if (fetchRes.ok) {
-          georeferenceStr = await fetchRes.text();
-          console.log("[MapElevation] Successfully loaded fallback georeference.json from server");
-        } else {
-          console.warn("[MapElevation] Failed to fetch /georeference.json fallback:", fetchRes.status);
-        }
-      } catch (fetchErr) {
-        console.error("[MapElevation] Error fetching fallback /georeference.json:", fetchErr);
-      }
+        const headerData = JSON.parse(fieldHeaderStr);
+        imageWidth = parseFloat(headerData['x-width'] || headerData['x_width']) || 1000;
+        imageHeight = parseFloat(headerData['x-height'] || headerData['x_height']) || 1000;
+      } catch (e) {}
     }
     
-    if (!georeferenceStr) {
-      console.warn("[MapElevation] No georeferencing data found in localStorage or fallback");
-      return null;
-    }
+    // Convert to pixel space
+    const qx = ((cx - lon_min) / (lon_max - lon_min)) * imageWidth;
+    const qy = ((cy - lat_min) / (lat_max - lat_min)) * imageHeight;
     
-    const georeference = JSON.parse(georeferenceStr);
-    const points = georeference.points;
-    if (!Array.isArray(points) || points.length === 0) {
-      console.warn("[MapElevation] Georeference data has no points array or it is empty");
-      return null;
-    }
+    console.log(`[MapElevation] Matching subblock centroid in pixel space: px=${qx}, py=${qy}`);
     
-    console.log(`[MapElevation] Total georeference points to check: ${points.length}`);
-    
-    let sumElevation = 0;
-    let countPoints = 0;
-    
-    // PIP check function using ray-casting algorithm
-    const isPointInPolygon = (point: [number, number], vs: [number, number][]) => {
-      const x = point[0], y = point[1];
-      let inside = false;
-      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
-        const xi = vs[i][0], yi = vs[i][1];
-        const xj = vs[j][0], yj = vs[j][1];
-        const intersect = ((yi > y) !== (yj > y))
-          && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
-    };
-    
-    // Loop through all points and check if inside the polygon using x and y coordinates
+    let closestPoint: any = null;
+    let minDistance = Infinity;
+
     points.forEach((p: any) => {
-      if (typeof p.x === 'number' && typeof p.y === 'number' && typeof p.elevation === 'number') {
-        if (isPointInPolygon([p.x, p.y], coordinates)) {
-          sumElevation += p.elevation;
-          countPoints++;
+      const px = parseFloat(p.x);
+      const py = parseFloat(p.y);
+      
+      if (!isNaN(px) && !isNaN(py) && typeof p.elevation === 'number') {
+        const dist = Math.sqrt((px - qx) ** 2 + (py - qy) ** 2);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPoint = p;
         }
       }
     });
     
-    console.log(`[MapElevation] Found ${countPoints} points inside the polygon. Sum elevation: ${sumElevation}`);
-    
-    if (countPoints > 0) {
-      const avg = sumElevation / countPoints;
-      const result = Math.round(avg * 100) / 100;
-      console.log(`[MapElevation] Computed average elevation: ${result}`);
-      return result;
+    if (closestPoint) {
+      console.log(`[MapElevation] Closest point found elevation: ${closestPoint.elevation}`);
+      return closestPoint.elevation;
     } else {
-      console.warn("[MapElevation] No points were found inside the drawn polygon boundaries");
+      console.warn("[MapElevation] No closest point found");
     }
   } catch (error) {
     console.error("[MapElevation] Failed to calculate average elevation:", error);
@@ -134,57 +175,7 @@ async function calculateAverageElevation(polygonGeom: any, fieldName: string): P
   return null;
 }
 
-function convertPixelPolygonToGeographic(polygonGeom: any, fieldData: any): any {
-  console.log("[MapElevation] Converting pixel polygon to geographic for field:", fieldData?.name);
-  try {
-    if (!polygonGeom || !fieldData) return polygonGeom;
-    if (!fieldData.mapVisualUrl) return polygonGeom;
-    const geom = typeof polygonGeom === 'string' ? JSON.parse(polygonGeom) : polygonGeom;
-    if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) {
-      return polygonGeom;
-    }
-    
-    // Retrieve width, height, and bounds
-    const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
-    const lon_min = bounds[0][1];
-    const lon_max = bounds[1][1];
-    const lat_max = bounds[0][0];
-    const lat_min = bounds[1][0];
-    
-    // Let's get the width and height of the image from localStorage headers
-    const fieldHeaderStr = localStorage.getItem(fieldData.name);
-    let imageWidth = 1000;
-    let imageHeight = 1000;
-    if (fieldHeaderStr) {
-      try {
-        const headerData = JSON.parse(fieldHeaderStr);
-        imageWidth = parseFloat(headerData['x-width']) || 1000;
-        imageHeight = parseFloat(headerData['x-height']) || 1000;
-      } catch (e) {}
-    }
-    
-    console.log(`[MapElevation] Image dimensions used for conversion: width=${imageWidth}, height=${imageHeight}`);
-    
-    // Convert coordinate ring
-    const pixelCoords = geom.coordinates[0] as [number, number][];
-    const geoCoords = pixelCoords.map(([px, py]) => {
-      const lon = lon_min + (px / imageWidth) * (lon_max - lon_min);
-      const lat = lat_min + (py / imageHeight) * (lat_max - lat_min);
-      return [lon, lat];
-    });
-    
-    const transformedGeom = {
-      ...geom,
-      coordinates: [geoCoords]
-    };
-    
-    console.log("[MapElevation] Transformed geographic geometry:", transformedGeom);
-    return typeof polygonGeom === 'string' ? JSON.stringify(transformedGeom) : transformedGeom;
-  } catch (error) {
-    console.error("[MapElevation] Failed to transform pixel polygon to geographic:", error);
-    return polygonGeom;
-  }
-}
+
 
 export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onSuccess }: CreateSubBlockModalProps) {
   const [formData, setFormData] = useState<SubBlockFormData>({
@@ -495,7 +486,7 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
             onClose={() => setIsMapEditorOpen(false)}
             onSave={async (geojson, deviceCoords, updatedDeviceIds) => {
               // Calculate average elevation using the pixel coordinates first
-              const avgElevation = await calculateAverageElevation(geojson, fieldData.name);
+              const avgElevation = await calculateAverageElevation(geojson, fieldData);
               if (avgElevation !== null) {
                 setFormData(prev => ({
                   ...prev,

@@ -72,6 +72,7 @@ export const fields = mst.table('fields', {
   notes:                text('notes'),
   mapVisualUrl:         text('map_visual_url'),
   mapBounds:            jsonb('map_bounds'),
+  mapHeaders:           jsonb('map_headers'),
   assignedFileName:     text('assigned_file_name'),
   irrigationEdges:      json('irrigation_edges'),
   irrigationNodes:      json('irrigation_nodes'),

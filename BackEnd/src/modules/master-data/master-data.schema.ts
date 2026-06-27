@@ -42,6 +42,7 @@ export const CreateFieldSchema = z.object({
   is_source_depleted:   z.boolean().default(false),
   notes:                z.string().max(2000).optional(),
   assigned_file_name:   z.string().max(500).optional(),
+  map_headers:          z.any().optional().nullable(),
   irrigation_edges:     z.array(z.any()).optional().nullable(),
   irrigation_nodes:     z.array(z.any()).optional().nullable(),
 });

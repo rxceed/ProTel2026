@@ -3,7 +3,7 @@ import { apiClient, gisProcClient } from '@/api/client';
 /**
  * Fetch DTM georeferencing data and save to localStorage
  */
-async function fetchGeoreferenceDtm(fieldName: string) {
+async function fetchGeoreferenceDtm(fieldName: string, mapUrl?: string) {
   if (!fieldName) return;
   try {
     const geoDataStr = localStorage.getItem(fieldName);
@@ -23,12 +23,27 @@ async function fetchGeoreferenceDtm(fieldName: string) {
     }
 
     let projectId = '';
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
+    
+    // Attempt to extract project_name from visual map URL
+    if (mapUrl) {
       try {
-        const user = JSON.parse(userStr);
-        projectId = user.id;
-      } catch (e) {}
+        const match = mapUrl.match(/[?&]project_name=([^&]+)/);
+        if (match) {
+          projectId = decodeURIComponent(match[1]);
+        }
+      } catch (e) {
+        console.warn('[MapCache] Failed to parse project_name from mapUrl', e);
+      }
+    }
+
+    if (!projectId) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr);
+          projectId = user.id;
+        } catch (e) {}
+      }
     }
 
     if (!projectId) {
@@ -79,8 +94,8 @@ export async function getCachedMapImageUrl(url: string, fieldName?: string): Pro
   if (!url) return '';
   
   if (fieldName) {
-    // Run DTM georeferencing request in background
-    fetchGeoreferenceDtm(fieldName);
+    // Run DTM georeferencing request in background with map visual URL
+    fetchGeoreferenceDtm(fieldName, url);
   }
   
   try {

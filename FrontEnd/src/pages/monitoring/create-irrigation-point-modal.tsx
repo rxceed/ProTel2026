@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Map, Check, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { apiClient } from '@/api/client';
+import { apiClient, gisProcClient } from '@/api/client';
 import { IrrigationPointMapEditor } from '@/components/mapping/IrrigationPointMapEditor';
 import { toLonLat } from 'ol/proj';
 
@@ -13,31 +13,117 @@ interface CreateIrrigationPointModalProps {
   onSuccess: () => void;
 }
 
-function getPointElevation(point: [number, number], fieldName: string): number | null {
+async function fetchGeoreferencePoints(fieldData: any): Promise<any[]> {
+  if (!fieldData || !fieldData.name) return [];
+  const fieldName = fieldData.name;
+  
+  // 1. Try to read from localStorage
+  let georeferenceStr = localStorage.getItem(`${fieldName}_georeference`);
+  if (georeferenceStr) {
+    try {
+      const parsed = JSON.parse(georeferenceStr);
+      if (Array.isArray(parsed.points)) return parsed.points;
+    } catch (e) {}
+  }
+  
+  // 2. Fallback to localStorage keys for georeference metadata
+  const geoDataStr = localStorage.getItem(fieldName) || localStorage.getItem(`map_headers_${fieldName}`);
+  if (!geoDataStr) {
+    console.warn(`[MapElevation] No georeferencing metadata found in localStorage for: ${fieldName}`);
+    return [];
+  }
+  
   try {
-    let georeferenceStr = localStorage.getItem(`${fieldName}_georeference`);
-    if (!georeferenceStr) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.toLowerCase().endsWith('_georeference')) {
-          georeferenceStr = localStorage.getItem(key);
-          break;
-        }
+    const geoData = JSON.parse(geoDataStr);
+    const x_crs = geoData['x_crs'] || geoData['x-crs'] || '';
+    const x_bounds = geoData['x_bounds'] || geoData['x-bounds'] || '';
+    const x_transform = geoData['x_transform'] || geoData['x-transform'] || '';
+    const max_resolution = geoData['max_resolution'] || geoData['max-resolution'] || '';
+    
+    let projectId = '';
+    const mapUrl = fieldData.mapVisualUrl;
+    if (mapUrl) {
+      const match = mapUrl.match(/[?&]project_name=([^&]+)/);
+      if (match) {
+        projectId = decodeURIComponent(match[1]);
       }
     }
-    if (!georeferenceStr) return null;
-    const georeference = JSON.parse(georeferenceStr);
-    const points = georeference.points;
-    if (!Array.isArray(points) || points.length === 0) return null;
+    
+    if (!projectId) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        projectId = user.id;
+      }
+    }
+    
+    if (!projectId) {
+      const authRes = await apiClient.get('/auth/me');
+      projectId = authRes.data?.data?.id;
+    }
+    
+    if (!projectId) return [];
+    
+    const res = await gisProcClient.get(`/webodm/projects/${projectId}/tasks/${fieldName}/dtm`, {
+      params: {
+        max_resolution,
+        x_crs,
+        x_bounds,
+        x_transform
+      }
+    });
+    
+    if (res.data && Array.isArray(res.data.points)) {
+      localStorage.setItem(`${fieldName}_georeference`, JSON.stringify(res.data));
+      return res.data.points;
+    }
+  } catch (err) {
+    console.error(`[MapElevation] Failed to fetch georeference DTM for ${fieldName}:`, err);
+  }
+  
+  return [];
+}
+
+async function getPointElevation(point: [number, number], fieldData: any): Promise<number | null> {
+  try {
+    if (!point || !fieldData) return null;
+    const points = await fetchGeoreferencePoints(fieldData);
+    if (points.length === 0) return null;
+    
+    const [cx, cy] = point; // [lon, lat]
+    
+    // Convert geographic coordinates [cx, cy] to pixel coordinates [qx, qy]
+    const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
+    const lon_min = bounds[0][1];
+    const lon_max = bounds[1][1];
+    const lat_max = bounds[0][0];
+    const lat_min = bounds[1][0];
+    
+    const fieldHeaderStr = localStorage.getItem(fieldData.name) || localStorage.getItem(`map_headers_${fieldData.name}`);
+    let imageWidth = 1000;
+    let imageHeight = 1000;
+    if (fieldHeaderStr) {
+      try {
+        const headerData = JSON.parse(fieldHeaderStr);
+        imageWidth = parseFloat(headerData['x-width'] || headerData['x_width']) || 1000;
+        imageHeight = parseFloat(headerData['x-height'] || headerData['x_height']) || 1000;
+      } catch (e) {}
+    }
+    
+    const qx = ((cx - lon_min) / (lon_max - lon_min)) * imageWidth;
+    const qy = ((cy - lat_min) / (lat_max - lat_min)) * imageHeight;
+    
+    console.log(`[MapElevation] Matching point in pixel space: px=${qx}, py=${qy}`);
     
     let closestPoint: any = null;
     let minDistance = Infinity;
-    
-    const [px, py] = point;
-    
+
     points.forEach((p: any) => {
-      if (typeof p.x === 'number' && typeof p.y === 'number' && typeof p.elevation === 'number') {
-        const dist = Math.sqrt((p.x - px) ** 2 + (p.y - py) ** 2);
+      const px = parseFloat(p.x);
+      const py = parseFloat(p.y);
+      
+      if (!isNaN(px) && !isNaN(py) && typeof p.elevation === 'number') {
+        const dist = Math.sqrt((px - qx) ** 2 + (py - qy) ** 2);
         if (dist < minDistance) {
           minDistance = dist;
           closestPoint = p;
@@ -224,7 +310,7 @@ export function CreateIrrigationPointModal({ isOpen, fieldId, initialData, onClo
             subBlocks={subBlocks}
             embankments={embankments}
             onClose={() => setIsMapEditorOpen(false)}
-            onSave={(coordsList, mapWidth, mapHeight) => {
+            onSave={async (coordsList, mapWidth, mapHeight) => {
               const isMulti = Array.isArray(coordsList[0]);
               
               if (fieldData.mapVisualUrl) {
@@ -236,7 +322,7 @@ export function CreateIrrigationPointModal({ isOpen, fieldId, initialData, onClo
                     type: 'MultiPoint',
                     coordinates: pts
                   });
-                  const elevation = getPointElevation(coordsList[0] as [number, number], fieldData.name);
+                  const elevation = await getPointElevation(pts[0], fieldData);
                   if (elevation !== null) setElevationM(elevation);
                 } else {
                   const singleCoords = coordsList as [number, number];
@@ -245,7 +331,7 @@ export function CreateIrrigationPointModal({ isOpen, fieldId, initialData, onClo
                     type: 'Point',
                     coordinates: [lon, lat]
                   });
-                  const elevation = getPointElevation(singleCoords, fieldData.name);
+                  const elevation = await getPointElevation([lon, lat], fieldData);
                   if (elevation !== null) setElevationM(elevation);
                 }
               } else {
