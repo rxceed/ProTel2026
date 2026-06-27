@@ -75,16 +75,34 @@ function ActionModal({
 }: {
   task: Assignment;
   onClose: () => void;
-  onSubmit: (action: 'executed' | 'skipped' | 'deferred', notes: string) => Promise<void>;
+  onSubmit: (action: 'executed' | 'skipped' | 'deferred', notes: string, skipReason?: string, impactedSubBlockId?: string) => Promise<void>;
 }) {
   const [notes, setNotes]     = useState('');
   const [submitting, setSub]  = useState(false);
   const [selected, setSelected] = useState<'executed' | 'skipped' | 'deferred' | null>(null);
+  const [skipReason, setSkipReason] = useState<'pematang_jebol' | 'lainnya' | ''>('');
+  const [impactedSubBlockId, setImpactedSubBlockId] = useState<string>('');
+  const [fieldSubBlocks, setFieldSubBlocks] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (selected === 'skipped') {
+      apiClient.get(`/fields/${task.field_id}/sub-blocks`)
+        .then(res => {
+           setFieldSubBlocks(res.data.data.filter((sb: any) => sb.id !== task.sub_block_id));
+        })
+        .catch(console.error);
+    }
+  }, [selected, task.field_id, task.sub_block_id]);
 
   const handleSubmit = async () => {
     if (!selected) return;
     setSub(true);
-    await onSubmit(selected, notes);
+    await onSubmit(
+      selected, 
+      notes, 
+      selected === 'skipped' && skipReason ? skipReason : undefined, 
+      selected === 'skipped' && skipReason === 'pematang_jebol' && impactedSubBlockId ? impactedSubBlockId : undefined
+    );
     setSub(false);
   };
 
@@ -116,6 +134,42 @@ function ActionModal({
             </button>
           ))}
         </div>
+
+        {selected === 'skipped' && (
+          <div className="space-y-3 p-3 bg-slate-50 border rounded-xl">
+            <div>
+              <label className="text-xs font-semibold text-slate-700">Alasan Lewati</label>
+              <select
+                className="w-full mt-1 border bg-white px-3 py-2 text-sm rounded-md"
+                value={skipReason}
+                onChange={e => setSkipReason(e.target.value as any)}
+              >
+                <option value="">-- Pilih Alasan --</option>
+                <option value="pematang_jebol">Pematang Jebol / Bocor (Darurat)</option>
+                <option value="lainnya">Lainnya</option>
+              </select>
+            </div>
+            
+            {skipReason === 'pematang_jebol' && (
+              <div>
+                <label className="text-xs font-semibold text-slate-700">Kotak Imbas Jebol (Opsional)</label>
+                <select
+                  className="w-full mt-1 border bg-white px-3 py-2 text-sm rounded-md"
+                  value={impactedSubBlockId}
+                  onChange={e => setImpactedSubBlockId(e.target.value)}
+                >
+                  <option value="">-- Tidak ada / Tidak tahu --</option>
+                  {fieldSubBlocks.map(sb => (
+                     <option key={sb.id} value={sb.id}>{sb.name} ({sb.code})</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Sistem DSS akan menghentikan evaluasi untuk kotak ini hingga pematang diperbaiki.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Notes */}
         <textarea
@@ -266,12 +320,14 @@ export function TasksPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleAction = async (action: 'executed' | 'skipped' | 'deferred', notes: string) => {
+  const handleAction = async (action: 'executed' | 'skipped' | 'deferred', notes: string, skipReason?: string, impactedSubBlockId?: string) => {
     if (!actionTarget) return;
     try {
       await apiClient.post(`/assignments/${actionTarget.id}/action`, {
         action,
         operator_notes: notes || undefined,
+        skip_reason: skipReason,
+        impacted_sub_block_id: impactedSubBlockId
       });
       setActionTarget(null);
       await load();

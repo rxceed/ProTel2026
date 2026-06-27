@@ -39,6 +39,7 @@ export const CreateFieldSchema = z.object({
   area_hectares:        z.coerce.number().positive().optional(),
   operator_count_default: z.coerce.number().int().min(1).max(50).default(1),
   decision_cycle_mode:  z.enum(['normal', 'siaga']).default('normal'),
+  is_source_depleted:   z.boolean().default(false),
   notes:                z.string().max(2000).optional(),
   assigned_file_name:   z.string().max(500).optional(),
   irrigation_edges:     z.array(z.any()).optional().nullable(),
@@ -46,6 +47,10 @@ export const CreateFieldSchema = z.object({
 });
 
 export const UpdateFieldSchema = CreateFieldSchema.partial();
+
+export const DroughtStatusSchema = z.object({
+  is_source_depleted: z.boolean(),
+});
 
 export const AssignUserFieldSchema = z.object({
   user_id:    z.string().uuid('user_id harus berupa UUID'),

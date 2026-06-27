@@ -108,10 +108,14 @@ export async function getSubBlockRecommendations(subBlockId: string) {
     .limit(10);
 }
 
+import { managementEvents as managementEventsTable } from '@/db/schema';
+
 /** Operator feedback on a recommendation */
 export const FeedbackSchema = z.object({
   feedback_status: z.enum(['acknowledged', 'executed', 'skipped', 'deferred']),
   operator_notes:  z.string().max(1000).optional(),
+  skip_reason:     z.enum(['pematang_jebol', 'lainnya']).optional(),
+  impacted_sub_block_id: z.string().uuid().optional(),
 });
 
 export async function submitFeedback(
@@ -120,7 +124,7 @@ export async function submitFeedback(
   input:   z.infer<typeof FeedbackSchema>,
 ) {
   const [rec] = await db
-    .select({ id: recsTable.id })
+    .select({ id: recsTable.id, fieldId: recsTable.fieldId, subBlockId: recsTable.subBlockId })
     .from(recsTable)
     .where(eq(recsTable.id, recId))
     .limit(1);
@@ -138,6 +142,44 @@ export async function submitFeedback(
     })
     .where(eq(recsTable.id, recId))
     .returning();
+
+  // Handle Doomsday Override: Pematang Jebol
+  if (input.feedback_status === 'skipped' && input.skip_reason === 'pematang_jebol' && rec.subBlockId) {
+    const doomsdayDate = new Date('2099-12-31T23:59:59.000Z');
+    
+    const eventsToInsert = [];
+    
+    // 1. Event untuk kotak saat ini
+    eventsToInsert.push({
+      fieldId: rec.fieldId,
+      subBlockId: rec.subBlockId,
+      eventType: 'maintenance',
+      eventDate: new Date().toISOString().split('T')[0],
+      attentionFlagText: 'Pematang Jebol/Bocor',
+      flagActiveHours: 999999, // practically forever
+      flagExpiresAt: doomsdayDate,
+      reportedBy: userId,
+      notes: `Dilaporkan saat skip rekomendasi: ${input.operator_notes || 'Tanpa catatan'}`,
+    });
+
+    // 2. Event untuk kotak tetangga (jika ada)
+    if (input.impacted_sub_block_id) {
+      eventsToInsert.push({
+        fieldId: rec.fieldId,
+        subBlockId: input.impacted_sub_block_id,
+        eventType: 'maintenance',
+        eventDate: new Date().toISOString().split('T')[0],
+        attentionFlagText: 'Pematang Jebol/Bocor',
+        flagActiveHours: 999999,
+        flagExpiresAt: doomsdayDate,
+        reportedBy: userId,
+        notes: `Dilaporkan sebagai imbas jebol dari kotak ${rec.subBlockId}`,
+      });
+    }
+
+    await db.insert(managementEventsTable).values(eventsToInsert);
+  }
+
   return updated;
 }
 

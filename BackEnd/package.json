@@ -11,6 +11,7 @@
     "db:reset": "ts-node -r tsconfig-paths/register src/scripts/reset.ts",
     "db:seed": "ts-node -r tsconfig-paths/register src/scripts/seed.ts",
     "db:seed:dev": "ts-node -r tsconfig-paths/register src/scripts/seed-dev.ts",
+    "db:seed:user": "ts-node -r tsconfig-paths/register src/scripts/seed-user-subblocks.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:setup:dev": "npm run db:migrate && npm run db:seed && npm run db:seed:dev",
     "db:generate": "drizzle-kit generate",

@@ -16,6 +16,7 @@ interface Field {
   waterSourceType: string;
   areaHectares: number | null;
   isActive: boolean;
+  isSourceDepleted: boolean;
   mapVisualUrl: string | null;
   mapBounds: number[][] | null;
   assignedFileName?: string | null;
@@ -137,6 +138,7 @@ export function FieldsPage() {
                     <th className="px-6 py-3 font-medium">Luas Area</th>
                     <th className="px-6 py-3 font-medium">Water Source</th>
                     <th className="px-6 py-3 font-medium text-center">Status</th>
+                    <th className="px-6 py-3 font-medium text-center">Sungai / Sumber</th>
                     <th className="px-6 py-3 font-medium text-right">Aksi</th>
                   </tr>
                 </thead>
@@ -159,6 +161,27 @@ export function FieldsPage() {
                           <Badge variant={field.isActive ? "default" : "secondary"}>
                             {field.isActive ? 'Aktif' : 'Non-aktif'}
                           </Badge>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await apiClient.patch(`/fields/${field.id}/drought-status`, {
+                                  is_source_depleted: !field.isSourceDepleted
+                                });
+                                fetchFields();
+                              } catch (e) {
+                                alert('Gagal mengubah status sungai');
+                              }
+                            }}
+                            className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                              field.isSourceDepleted 
+                                ? 'bg-red-100 text-red-800 border-red-200 border' 
+                                : 'bg-green-100 text-green-800 border-green-200 border'
+                            }`}
+                          >
+                            {field.isSourceDepleted ? 'Kering / Darurat' : 'Normal / Mengalir'}
+                          </button>
                         </td>
                         <td className="px-6 py-4 text-right flex justify-end gap-2">
                           <Button 
@@ -200,7 +223,7 @@ export function FieldsPage() {
                       </tr>
                       {managingMapFieldId === field.id && (
                         <tr key={`${field.id}-map-row`} className="bg-muted/5 animate-in slide-in-from-top-1 duration-200">
-                          <td colSpan={6} className="px-6 py-4 border-y">
+                          <td colSpan={7} className="px-6 py-4 border-y">
                             <MapVisualManager 
                               fieldId={field.id}
                               fieldName={field.name}

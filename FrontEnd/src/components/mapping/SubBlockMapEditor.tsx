@@ -548,7 +548,21 @@ export function SubBlockMapEditor({
     if (!polygonFeature) return alert('Silakan gambar poligon terlebih dahulu');
     
     const format = new GeoJSON();
-    const geojson = format.writeGeometryObject(polygonFeature.getGeometry()!);
+    let geojson: any;
+    if (!field.mapVisualUrl) {
+      geojson = format.writeGeometryObject(polygonFeature.getGeometry()!, {
+        dataProjection: 'EPSG:4326',
+        featureProjection: 'EPSG:3857'
+      });
+    } else {
+      const geom = polygonFeature.getGeometry() as any;
+      const rawCoords = (geom.getCoordinates ? geom.getCoordinates()[0] : []) as [number, number][];
+      const convertedCoords = rawCoords.map((coord) => mapToGeoCoords(coord, true, mapWidth, mapHeight));
+      geojson = {
+        type: 'Polygon',
+        coordinates: [convertedCoords]
+      };
+    }
     
     // Find all device markers
     const deviceMarkers = features.filter(f => f.get('type') === 'device_marker');

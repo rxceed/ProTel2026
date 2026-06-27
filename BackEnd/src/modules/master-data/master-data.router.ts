@@ -98,6 +98,19 @@ masterDataRouter.patch(
   }),
 );
 
+// PATCH /fields/:fieldId/drought-status
+import { DroughtStatusSchema } from './master-data.schema';
+masterDataRouter.patch(
+  '/fields/:fieldId/drought-status',
+  requireAuth,
+  requireFieldAccess('manager'),
+  validate(DroughtStatusSchema),
+  h(async (req, res) => {
+    const field = await fieldsService.updateDroughtStatus(req.params['fieldId']!, req.body.is_source_depleted);
+    res.json(successResponse(field));
+  }),
+);
+
 // POST /fields/:fieldId/users — assign user ke field
 masterDataRouter.post(
   '/fields/:fieldId/users',
@@ -189,6 +202,17 @@ masterDataRouter.get(
   h(async (req, res) => {
     const sb = await subBlocksService.getById(req.params['id']!);
     res.json(successResponse(sb));
+  }),
+);
+
+// POST /sub-blocks/:id/resolve-embankment
+masterDataRouter.post(
+  '/sub-blocks/:id/resolve-embankment',
+  requireAuth,
+  requireFieldAccess('manager'),
+  h(async (req, res) => {
+    await subBlocksService.resolveEmbankmentBreak(req.params['id']!, req.user!.id);
+    res.json(successResponse({ message: 'Status darurat pematang jebol berhasil dicabut' }));
   }),
 );
 

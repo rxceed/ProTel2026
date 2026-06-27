@@ -138,6 +138,7 @@ function convertPixelPolygonToGeographic(polygonGeom: any, fieldData: any): any 
   console.log("[MapElevation] Converting pixel polygon to geographic for field:", fieldData?.name);
   try {
     if (!polygonGeom || !fieldData) return polygonGeom;
+    if (!fieldData.mapVisualUrl) return polygonGeom;
     const geom = typeof polygonGeom === 'string' ? JSON.parse(polygonGeom) : polygonGeom;
     if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) {
       return polygonGeom;
@@ -502,9 +503,7 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
                 }));
               }
               
-              // Convert the pixel GeoJSON to a geographic GeoJSON before setting and saving
-              const geoGeojson = convertPixelPolygonToGeographic(geojson, fieldData);
-              setPolygonGeom(geoGeojson);
+              setPolygonGeom(geojson);
               if (deviceCoords) {
                 setPendingDeviceCoords(prev => ({ ...prev, ...deviceCoords }));
               }

@@ -2,6 +2,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { db } from '@/db/client';
 import {
+  fields as fieldsTable,
   subBlocks as subBlocksTable,
   cropCycles as cropCyclesTable,
   irrigationRuleProfiles as ruleProfilesTable,
@@ -13,6 +14,7 @@ import {
   subBlockCurrentStates as currentStatesTable,
   irrigationRecommendations as recsTable,
   managementEvents as managementEventsTable,
+  agronomicTreatments as agronomicTreatmentsTable,
 } from '@/db/schema';
 import { getLatestForecast, getActiveWarnings } from '@/modules/weather/bmkg.service';
 import { buildFieldStates } from '@/modules/state-builder/state-builder.service';
@@ -69,7 +71,7 @@ interface EvaluateRequest {
   job_id: string;
   field_id: string;
   cycle_mode: string;
-  field_context: { water_source_type: string; operator_count: number };
+  field_context: { water_source_type: string; operator_count: number; is_source_depleted: boolean };
   sub_blocks: SubBlockInputPayload[];
   weather: {
     rain_events: any[]; // RainEvent[] dari full_response_json
@@ -129,7 +131,19 @@ export async function runDecisionCycleForField(
     // 2. Refresh state for all sub-blocks (fresh data before evaluation)
     await buildFieldStates(fieldId);
 
-    // 3. Load all active sub-blocks with full context
+    // 3a. Load field context
+    const [field] = await db.select({
+      waterSourceType: fieldsTable.waterSourceType,
+      operatorCountDefault: fieldsTable.operatorCountDefault,
+      isSourceDepleted: fieldsTable.isSourceDepleted,
+    })
+    .from(fieldsTable)
+    .where(eq(fieldsTable.id, fieldId))
+    .limit(1);
+
+    if (!field) throw new Error(`Field ${fieldId} not found`);
+
+    // 3b. Load all active sub-blocks with full context
     const subBlocks = await db
       .select({
         id: subBlocksTable.id,
@@ -181,6 +195,27 @@ export async function runDecisionCycleForField(
       flagMap.set(f.subBlockId, arr);
     });
 
+    // 7.5 Load agronomic treatments overrides
+    const treatmentRows = await db.select().from(agronomicTreatmentsTable)
+      .where(and(
+        eq(agronomicTreatmentsTable.fieldId, fieldId),
+        sql`${agronomicTreatmentsTable.overrideExpiresAt} > NOW()`,
+      ));
+    const treatmentMap = new Map<string, typeof agronomicTreatmentsTable.$inferSelect>();
+    treatmentRows.forEach(t => {
+      if (t.subBlockId) {
+        // subBlock specific
+        treatmentMap.set(t.subBlockId, t);
+      } else {
+        // field level - applied to all subblocks
+        subBlocks.forEach(sb => {
+          if (!treatmentMap.has(sb.id)) {
+            treatmentMap.set(sb.id, t);
+          }
+        });
+      }
+    });
+
     // 8. Load flow paths / matrix for field
     const [flowPath] = await db.select().from(flowPathsTable)
       .where(and(
@@ -221,18 +256,30 @@ export async function runDecisionCycleForField(
           hst: cycle.currentHst,
           variety_name: cycle.varietyName,
         } : null,
-        rule_profile: rule ? {
-          id: rule.id,
-          awd_lower_threshold_cm: parseFloat(rule.awdLowerThresholdCm),
-          awd_upper_target_cm: parseFloat(rule.awdUpperTargetCm),
-          drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : null,
-          priority_weight: parseFloat(rule.priorityWeight),
-          rain_delay_mm: parseFloat(rule.rainDelayMm),
-          target_confidence: rule.targetConfidence,
-          rainfed_modifier_pct: parseFloat(rule.rainfedModifierPct),
-        } : null,
+        rule_profile: rule ? (() => {
+          const baseRule = {
+            id: rule.id,
+            awd_lower_threshold_cm: parseFloat(rule.awdLowerThresholdCm),
+            awd_upper_target_cm: parseFloat(rule.awdUpperTargetCm),
+            drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : null,
+            priority_weight: parseFloat(rule.priorityWeight),
+            rain_delay_mm: parseFloat(rule.rainDelayMm),
+            target_confidence: rule.targetConfidence,
+            rainfed_modifier_pct: parseFloat(rule.rainfedModifierPct),
+          };
+
+          // Override rule profile with agronomic treatment target water level
+          const treatment = treatmentMap.get(sb.id);
+          if (treatment) {
+            const targetCm = parseFloat(treatment.targetWaterLevelCm);
+            // Lock the lower threshold and upper target tightly around the medicine target
+            baseRule.awd_upper_target_cm = targetCm;
+            baseRule.awd_lower_threshold_cm = targetCm - 1; // 1 cm tolerance
+          }
+          return baseRule;
+        })() : null,
         management_flags: flags.map(f => ({
-          event_type: f.eventType,
+          event_type: (f.eventType === 'maintenance' || f.eventType === 'snooze_dss') && f.attentionFlagText?.includes('Pematang') ? 'snooze_dss' : f.eventType,
           flag_text: f.attentionFlagText,
           expires_at: f.flagExpiresAt?.toISOString() ?? new Date().toISOString(),
         })),
@@ -249,7 +296,7 @@ export async function runDecisionCycleForField(
       job_id: jobId,
       field_id: fieldId,
       cycle_mode: cycleMode,
-      field_context: { water_source_type: 'irrigated', operator_count: 1 },
+      field_context: { water_source_type: field.waterSourceType, operator_count: field.operatorCountDefault, is_source_depleted: field.isSourceDepleted },
       sub_blocks: subBlocksPayload,
       weather: {
         rain_events: (forecast?.fullResponseJson as any)?.rain_events ?? [],
@@ -305,7 +352,6 @@ export async function runDecisionCycleForField(
         attentionFlagsJson: rec.attention_flags_json as object,
         operatorWarningText: rec.operator_warning_text,
         validUntil,
-        engineVersion: result.engine_version,
         feedbackStatus: 'pending',
       }).onConflictDoNothing(); // idempotent re-runs
     }

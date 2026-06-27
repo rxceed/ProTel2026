@@ -67,6 +67,7 @@ export const fields = mst.table('fields', {
   areaHectares:         numeric('area_hectares', { precision: 8, scale: 4 }),
   operatorCountDefault: integer('operator_count_default').notNull().default(1),
   decisionCycleMode:    text('decision_cycle_mode').notNull().default('normal'),
+  isSourceDepleted:     boolean('is_source_depleted').notNull().default(false),
   isActive:             boolean('is_active').notNull().default(true),
   notes:                text('notes'),
   mapVisualUrl:         text('map_visual_url'),

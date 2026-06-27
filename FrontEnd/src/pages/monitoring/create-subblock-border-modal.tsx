@@ -105,6 +105,7 @@ async function calculateAverageElevation(polygonGeom: any, fieldName: string): P
 function convertPixelPolygonToGeographic(polygonGeom: any, fieldData: any): any {
   try {
     if (!polygonGeom || !fieldData) return polygonGeom;
+    if (!fieldData.mapVisualUrl) return polygonGeom;
     const geom = typeof polygonGeom === 'string' ? JSON.parse(polygonGeom) : polygonGeom;
     if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) {
       return polygonGeom;
@@ -432,8 +433,7 @@ export function CreateSubBlockBorderModal({
                 }));
               }
 
-              const geoGeojson = convertPixelPolygonToGeographic(geojson, fieldData);
-              setPolygonGeom(geoGeojson);
+              setPolygonGeom(geojson);
               setIsMapEditorOpen(false);
             }}
           />

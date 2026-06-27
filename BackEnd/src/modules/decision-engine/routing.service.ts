@@ -207,11 +207,11 @@ export async function runWaterRouting(
   const uuidToCode = new Map<string, string>();
 
   subBlockRows.forEach((sb) => {
-    uuidToCode.set(sb.id, sb.code || sb.id.substring(0,8));
+    uuidToCode.set(sb.id, sb.code || sb.id.substring(0, 8));
   });
 
   const allNodes = [...subBlockRows, ...ipRows];
-  
+
   allNodes.forEach((n, idx) => {
     uuidToIdx.set(n.id, idx);
     idxToUuid.set(idx, n.id);

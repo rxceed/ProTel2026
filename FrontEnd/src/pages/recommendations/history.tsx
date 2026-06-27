@@ -152,6 +152,7 @@ export function RecommendationsHistoryPage() {
                     <th className="px-6 py-3 font-medium">Saran Aksi</th>
                     <th className="px-6 py-3 font-medium">Command</th>
                     <th className="px-6 py-3 font-medium">Keputusan Operator</th>
+                    <th className="px-6 py-3 font-medium">Catatan Lapangan</th>
                     <th className="px-6 py-3 font-medium">Tanggal Feedback</th>
                   </tr>
                 </thead>
@@ -176,6 +177,17 @@ export function RecommendationsHistoryPage() {
                            {getStatusIcon(item.feedbackStatus)}
                            {item.feedbackStatus}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 max-w-xs">
+                        {item.operatorNotes ? (
+                          <span className="text-sm text-foreground" title={item.operatorNotes}>
+                            {item.operatorNotes.length > 60
+                              ? item.operatorNotes.slice(0, 60) + '...'
+                              : item.operatorNotes}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-muted-foreground">
                         {item.feedbackAt ? new Date(item.feedbackAt).toLocaleString() : '-'}

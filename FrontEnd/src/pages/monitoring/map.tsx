@@ -7,6 +7,7 @@ import OSM from 'ol/source/OSM';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
+import WKB from 'ol/format/WKB';
 import { Style, Fill, Stroke, Text, Circle as CircleStyle } from 'ol/style';
 import { fromLonLat, transformExtent } from 'ol/proj';
 import ImageLayer from 'ol/layer/Image';
@@ -945,6 +946,38 @@ export function MapPage() {
   const [embankments, setEmbankments] = useState<Embankment[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
 
+  // Telemetry Heatmap State & Refs
+  const [subBlockTelemetryMap, setSubBlockTelemetryMap] = useState<Record<string, any>>({});
+  const subBlockTelemetryMapRef = useRef<Record<string, any>>({});
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  // Auto-fetch latest telemetry state when subblocks load
+  useEffect(() => {
+    if (subBlocks.length === 0) {
+      setSubBlockTelemetryMap({});
+      subBlockTelemetryMapRef.current = {};
+      return;
+    }
+    Promise.all(
+      subBlocks.map(sb =>
+        apiClient.get(`/telemetry/sub-blocks/${sb.id}/states/latest`)
+          .then(r => ({ id: sb.id, telem: r.data.data }))
+          .catch(() => ({ id: sb.id, telem: null }))
+      )
+    ).then(results => {
+      const mapData: Record<string, any> = {};
+      results.forEach(res => { if (res.telem) mapData[res.id] = res.telem; });
+      subBlockTelemetryMapRef.current = mapData;
+      setSubBlockTelemetryMap(mapData);
+      vectorSource.current?.changed();
+    });
+  }, [subBlocks]);
+
+  useEffect(() => {
+    vectorSource.current?.changed();
+  }, [activeTab]);
+
   const fetchMatrixResult = async () => {
     try {
       if (!selectedFieldId) {
@@ -1306,19 +1339,75 @@ export function MapPage() {
               });
             }
 
+            const sbId = feature.get('id');
+            const telem = subBlockTelemetryMapRef.current[sbId];
+            let color = 'rgba(34, 197, 94, 0.25)'; // Default green
+            let strokeColor = '#16a34a';
+            let textColor = '#166534';
+
+            if (telem) {
+              const tab = activeTabRef.current;
+              if (tab === 'water' && telem.waterLevelCm !== null && telem.waterLevelCm !== undefined) {
+                const wl = parseFloat(telem.waterLevelCm);
+                if (wl > 5) {
+                  color = 'rgba(59, 130, 246, 0.45)'; // Biru (Tergenang)
+                  strokeColor = '#2563eb';
+                  textColor = '#1e40af';
+                } else if (wl >= -5) {
+                  color = 'rgba(34, 197, 94, 0.45)'; // Hijau (Optimal AWD)
+                  strokeColor = '#16a34a';
+                  textColor = '#166534';
+                } else if (wl >= -15) {
+                  color = 'rgba(245, 158, 11, 0.45)'; // Kuning (Warning Kering)
+                  strokeColor = '#d97706';
+                  textColor = '#92400e';
+                } else {
+                  color = 'rgba(239, 68, 68, 0.5)'; // Merah (Kritis)
+                  strokeColor = '#dc2626';
+                  textColor = '#991b1b';
+                }
+              } else if (tab === 'temp' && (telem.temperatureC !== null || telem.tempC !== null)) {
+                const tc = parseFloat(telem.temperatureC ?? telem.tempC ?? 28);
+                if (tc > 32) {
+                  color = 'rgba(239, 68, 68, 0.45)'; // Panas
+                  strokeColor = '#dc2626';
+                  textColor = '#991b1b';
+                } else if (tc > 28) {
+                  color = 'rgba(245, 158, 11, 0.45)'; // Normal Hangat
+                  strokeColor = '#d97706';
+                  textColor = '#92400e';
+                } else {
+                  color = 'rgba(59, 130, 246, 0.45)'; // Sejuk
+                  strokeColor = '#2563eb';
+                  textColor = '#1e40af';
+                }
+              } else if (tab === 'humidity' && (telem.humidityPct !== null || telem.humidity !== null)) {
+                const hm = parseFloat(telem.humidityPct ?? telem.humidity ?? 70);
+                if (hm < 60) {
+                  color = 'rgba(245, 158, 11, 0.45)'; // Kering
+                  strokeColor = '#d97706';
+                  textColor = '#92400e';
+                } else {
+                  color = 'rgba(16, 185, 129, 0.45)'; // Lembab
+                  strokeColor = '#059669';
+                  textColor = '#065f46';
+                }
+              }
+            }
+
             return new Style({
               stroke: new Stroke({
-                color: '#16a34a',
-                width: 2,
+                color: strokeColor,
+                width: 2.5,
               }),
               fill: new Fill({
-                color: 'rgba(34, 197, 94, 0.2)',
+                color,
               }),
               text: new Text({
                 text: feature.get('name'),
                 font: 'bold 12px Inter, sans-serif',
-                fill: new Fill({ color: '#166534' }),
-                stroke: new Stroke({ color: '#fff', width: 2 }),
+                fill: new Fill({ color: textColor }),
+                stroke: new Stroke({ color: '#fff', width: 2.5 }),
               }),
             });
           },
@@ -1623,14 +1712,29 @@ export function MapPage() {
         vectorSource.current.clear();
 
         const geojsonFormat = new GeoJSON();
+        const wkbFormat = new WKB();
+        const parseGeomData = (rawGeom: any) => {
+          if (!rawGeom) return null;
+          if (typeof rawGeom === 'string') {
+            if (rawGeom.startsWith('01') || rawGeom.startsWith('00')) {
+              try {
+                const olGeom = wkbFormat.readGeometry(rawGeom);
+                return geojsonFormat.writeGeometryObject(olGeom);
+              } catch (e) {
+                return null;
+              }
+            }
+            try { return JSON.parse(rawGeom); } catch (e) { return null; }
+          }
+          return rawGeom;
+        };
+
         const features: any[] = [];
 
         subBlocks.forEach((sb) => {
           if (!sb.polygonGeom) return;
           try {
-            const geom = typeof sb.polygonGeom === 'string' 
-              ? JSON.parse(sb.polygonGeom) 
-              : sb.polygonGeom;
+            const geom = parseGeomData(sb.polygonGeom);
             
             if (!geom || !geom.coordinates || geom.coordinates.length === 0) return;
             
@@ -1652,11 +1756,10 @@ export function MapPage() {
         });
 
         embankments.forEach((emb) => {
-          if (!emb.polygonGeom && !emb.polygon_geom) return;
+          const raw = emb.polygonGeom || emb.polygon_geom;
+          if (!raw) return;
           try {
-            const geom = typeof (emb.polygonGeom || emb.polygon_geom) === 'string'
-              ? JSON.parse(emb.polygonGeom || emb.polygon_geom)
-              : (emb.polygonGeom || emb.polygon_geom);
+            const geom = parseGeomData(raw);
             
             if (!geom || !geom.coordinates || geom.coordinates.length === 0) return;
             
@@ -1684,9 +1787,7 @@ export function MapPage() {
         points.forEach((ip) => {
           if (!ip.coordinatePoint) return;
           try {
-            const geom = typeof ip.coordinatePoint === 'string'
-              ? JSON.parse(ip.coordinatePoint)
-              : ip.coordinatePoint;
+            const geom = parseGeomData(ip.coordinatePoint);
 
             if (!geom || !geom.coordinates || geom.coordinates.length === 0) return;
 
@@ -1716,7 +1817,7 @@ export function MapPage() {
           let loc: { x: number; y: number } | null = null;
           if (d.coordinate) {
             try {
-              const geom = typeof d.coordinate === 'string' ? JSON.parse(d.coordinate) : d.coordinate;
+              const geom = parseGeomData(d.coordinate);
               if (geom && geom.type === 'Point' && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
                 loc = { x: geom.coordinates[0], y: geom.coordinates[1] };
               }
@@ -1847,21 +1948,74 @@ export function MapPage() {
           className="w-full h-full"
         />
 
+        {/* Interactive Telemetry Heatmap Legend */}
+        <div className="absolute bottom-4 left-4 z-20 bg-background/85 backdrop-blur-md border border-white/20 rounded-xl p-3 shadow-2xl max-w-xs transition-all duration-300">
+          <div className="text-xs font-bold text-foreground mb-2 flex items-center gap-1.5 border-b pb-1.5">
+            <Layers className="w-3.5 h-3.5 text-primary animate-pulse" />
+            <span>Legenda Heatmap ({activeTab === 'water' ? 'Tinggi Air' : activeTab === 'temp' ? 'Suhu' : 'Kelembaban'})</span>
+          </div>
+          <div className="flex flex-col gap-1.5 text-[11px] font-medium">
+            {activeTab === 'water' && (
+              <>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-500/80 border border-blue-600 shadow-sm" /><span>Tergenang / Full (&gt; +5 cm)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-500/80 border border-green-600 shadow-sm" /><span>Optimal AWD (-5 s.d. +5 cm)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Peringatan Kering (-15 s.d. -5 cm)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-500/80 border border-red-600 shadow-sm" /><span>Kering Kritis (&lt; -15 cm)</span></div>
+              </>
+            )}
+            {activeTab === 'temp' && (
+              <>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-500/80 border border-blue-600 shadow-sm" /><span>Sejuk (&lt; 28°C)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Normal Hangat (28 s.d. 32°C)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-500/80 border border-red-600 shadow-sm" /><span>Panas (&gt; 32°C)</span></div>
+              </>
+            )}
+            {activeTab === 'humidity' && (
+              <>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Kering (&lt; 60%)</span></div>
+                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-emerald-500/80 border border-emerald-600 shadow-sm" /><span>Lembab (&gt; 60%)</span></div>
+              </>
+            )}
+          </div>
+        </div>
+
         {/* Slide-Out Analytics Drawer */}
         {selectedSubBlock && (
           <div className="absolute top-0 right-0 h-full w-96 bg-background/95 backdrop-blur-md border-l shadow-2xl z-30 animate-in slide-in-from-right duration-300 flex flex-col">
             {/* Drawer Header */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <div>
-                <h3 className="font-bold text-lg text-foreground">{selectedSubBlock.name}</h3>
-                <p className="text-xs text-muted-foreground">Insight historis data telemetri</p>
+            <div className="flex flex-col p-4 border-b gap-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-lg text-foreground">{selectedSubBlock.name}</h3>
+                  <p className="text-xs text-muted-foreground">Insight historis data telemetri</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedSubBlock(null)}
+                  className="p-1.5 hover:bg-muted rounded-full text-muted-foreground transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button 
-                onClick={() => setSelectedSubBlock(null)}
-                className="p-1.5 hover:bg-muted rounded-full text-muted-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="w-full text-xs"
+                  onClick={async () => {
+                    if (confirm('Laporkan pematang untuk kotak ini telah diperbaiki?')) {
+                      try {
+                        await apiClient.post(`/sub-blocks/${selectedSubBlock.id}/resolve-embankment`);
+                        alert('Status darurat dicabut');
+                      } catch (e) {
+                        alert('Gagal mencabut status darurat');
+                      }
+                    }
+                  }}
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-1 text-green-500" />
+                  Pematang Diperbaiki
+                </Button>
+              </div>
             </div>
 
             {/* Drawer Content */}
