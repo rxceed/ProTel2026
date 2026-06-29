@@ -8,7 +8,6 @@ interface RuleFormData {
   description: string;
   bucket_code: string;
   phase_code: string;
-  awd_lower_threshold_cm: number | '';
   awd_upper_target_cm: number | '';
   drought_alert_cm: number | '';
   min_saturation_days: number;
@@ -30,9 +29,8 @@ export function CreateRuleModal({ isOpen, initialData, onClose, onSuccess }: Cre
     description: initialData?.description || '',
     bucket_code: initialData?.bucketCode || 'medium',
     phase_code: initialData?.phaseCode || 'land_prep',
-    awd_lower_threshold_cm: initialData?.awdLowerThresholdCm || -15,
     awd_upper_target_cm: initialData?.awdUpperTargetCm || 5,
-    drought_alert_cm: initialData?.droughtAlertCm || -25,
+    drought_alert_cm: initialData?.droughtAlertCm !== undefined && initialData?.droughtAlertCm !== null ? initialData.droughtAlertCm : '',
     min_saturation_days: initialData?.minSaturationDays || 1,
     rain_delay_mm: initialData?.rainDelayMm || 10,
     priority_weight: initialData?.priorityWeight || 1,
@@ -54,10 +52,17 @@ export function CreateRuleModal({ isOpen, initialData, onClose, onSuccess }: Cre
     setLoading(true);
 
     try {
+      const payload = {
+        ...formData,
+        drought_alert_cm: formData.drought_alert_cm === ''
+          ? (Number(formData.awd_upper_target_cm) - 10)
+          : Number(formData.drought_alert_cm)
+      };
+
       if (initialData?.id) {
-        await apiClient.patch(`/rule-profiles/${initialData.id}`, formData);
+        await apiClient.patch(`/rule-profiles/${initialData.id}`, payload);
       } else {
-        await apiClient.post('/rule-profiles', formData);
+        await apiClient.post('/rule-profiles', payload);
       }
       onSuccess();
       onClose();
@@ -130,29 +135,28 @@ export function CreateRuleModal({ isOpen, initialData, onClose, onSuccess }: Cre
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ambang Bawah (AWD) cm</label>
-              <input 
-                name="awd_lower_threshold_cm"
-                type="number"
-                value={formData.awd_lower_threshold_cm}
-                onChange={handleChange}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                placeholder="-15"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Target Genangan cm</label>
-              <input 
-                name="awd_upper_target_cm"
-                type="number"
-                value={formData.awd_upper_target_cm}
-                onChange={handleChange}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                placeholder="2"
-              />
-            </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Target Genangan cm</label>
+            <input 
+              name="awd_upper_target_cm"
+              type="number"
+              value={formData.awd_upper_target_cm}
+              onChange={handleChange}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              placeholder="2"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Batas Kritis Kekeringan (Drought Alert) cm</label>
+            <input 
+              name="drought_alert_cm"
+              type="number"
+              value={formData.drought_alert_cm}
+              onChange={handleChange}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              placeholder="Kosongkan untuk otomatis (Target Genangan - 10)"
+            />
           </div>
 
           <div className="space-y-2 hidden">

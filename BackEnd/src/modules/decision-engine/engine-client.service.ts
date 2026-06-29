@@ -257,11 +257,12 @@ export async function runDecisionCycleForField(
           variety_name: cycle.varietyName,
         } : null,
         rule_profile: rule ? (() => {
+          const upperTarget = parseFloat(rule.awdUpperTargetCm);
           const baseRule = {
             id: rule.id,
-            awd_lower_threshold_cm: parseFloat(rule.awdLowerThresholdCm),
-            awd_upper_target_cm: parseFloat(rule.awdUpperTargetCm),
-            drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : null,
+            awd_lower_threshold_cm: -15.0, // Default AWD lower threshold since column is deleted
+            awd_upper_target_cm: upperTarget,
+            drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : (upperTarget - 10),
             priority_weight: parseFloat(rule.priorityWeight),
             rain_delay_mm: parseFloat(rule.rainDelayMm),
             target_confidence: rule.targetConfidence,

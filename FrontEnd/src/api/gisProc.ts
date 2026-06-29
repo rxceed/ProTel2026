@@ -85,6 +85,21 @@ interface GetJobLogsResponse {
 }
 
 export const videoOpsApi = {
+  uploadParsedImages: (ownerId: string, filename: string, files: File[]) => {
+    const formData = new FormData();
+    formData.append('owner_id', ownerId);
+    formData.append('filename', filename);
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    return gisProcClient.post('/api/video-ops/parsed/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
   uploadVideo: (ownerId: string, file: File, srtFile?: File | null) => {
     const formData = new FormData();
     formData.append('owner_id', ownerId);

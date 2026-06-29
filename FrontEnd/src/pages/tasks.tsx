@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/client';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -295,6 +296,7 @@ function TaskCard({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function TasksPage() {
+  const dialog = useDialog();
   const [tab, setTab]               = useState<'pending' | 'completed'>('pending');
   const [pending, setPending]       = useState<Assignment[]>([]);
   const [completed, setCompleted]   = useState<CompletedAssignment[]>([]);
@@ -332,7 +334,7 @@ export function TasksPage() {
       setActionTarget(null);
       await load();
     } catch (err: any) {
-      alert(err?.response?.data?.message || 'Gagal menyimpan respons');
+      await dialog.alert(err?.response?.data?.message || 'Gagal menyimpan respons');
     }
   };
 

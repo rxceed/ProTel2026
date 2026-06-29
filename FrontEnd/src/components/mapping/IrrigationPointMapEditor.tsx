@@ -16,6 +16,7 @@ import Projection from 'ol/proj/Projection';
 import { Button } from '@/components/ui/button';
 import { X, Save, Trash2, MapPin } from 'lucide-react';
 import { getCachedMapImageUrl } from '@/lib/mapCache';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface IrrigationPointMapEditorProps {
   field: {
@@ -41,6 +42,7 @@ export function IrrigationPointMapEditor({
   subBlocks = [],
   embankments = []
 }: IrrigationPointMapEditorProps) {
+  const dialog = useDialog();
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
   const vectorSource = useRef(new VectorSource());
@@ -360,10 +362,13 @@ export function IrrigationPointMapEditor({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const features = vectorSource.current.getFeatures();
     const pointFeatures = features.filter(f => f.getGeometry()?.getType() === 'Point');
-    if (pointFeatures.length === 0) return alert('Silakan tentukan titik di peta terlebih dahulu');
+    if (pointFeatures.length === 0) {
+      await dialog.alert('Silakan tentukan titik di peta terlebih dahulu');
+      return;
+    }
 
     if (pointFeatures.length === 1) {
       const coords = (pointFeatures[0].getGeometry() as any).getCoordinates();

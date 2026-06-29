@@ -7,6 +7,7 @@ import { apiClient } from '@/api/client';
 import { CreateFieldModal } from './create-field-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
 import { MapVisualManager } from '@/components/mapping/MapVisualManager';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -24,6 +25,7 @@ interface Field {
 }
 
 export function FieldsPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,12 +53,13 @@ export function FieldsPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus lahan ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus lahan ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/fields/${id}`);
       fetchFields();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus lahan');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus lahan');
     }
   };
   const filteredFields = fields.filter(f => 
@@ -171,7 +174,7 @@ export function FieldsPage() {
                                 });
                                 fetchFields();
                               } catch (e) {
-                                alert('Gagal mengubah status sungai');
+                                await dialog.alert('Gagal mengubah status sungai');
                               }
                             }}
                             className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${

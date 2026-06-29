@@ -16,6 +16,7 @@ import Projection from 'ol/proj/Projection';
 import { Button } from '@/components/ui/button';
 import { X, Save, Trash2, MousePointer2, BoxSelect, Cpu, Check } from 'lucide-react';
 import { getCachedMapImageUrl } from '@/lib/mapCache';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface SubBlockMapEditorProps {
   field: {
@@ -47,6 +48,7 @@ export function SubBlockMapEditor({
   onSave, 
   onClose 
 }: SubBlockMapEditorProps) {
+  const dialog = useDialog();
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
   const vectorSource = useRef(new VectorSource());
@@ -160,6 +162,10 @@ export function SubBlockMapEditor({
               type: 'Feature',
               geometry: geomToLoad,
               properties: {},
+            },
+            imageUrl ? undefined : {
+              dataProjection: 'EPSG:4326',
+              featureProjection: 'EPSG:3857'
             }
           );
           vectorSource.current.addFeatures(Array.isArray(feature) ? feature : [feature]);
@@ -199,15 +205,21 @@ export function SubBlockMapEditor({
               };
             }
             
-            const feature = geojsonFormat.readFeatures({
-              type: 'Feature',
-              geometry: geomToLoad,
-              properties: {
-                type: 'existing_sub_block',
-                id: sb.id,
-                name: sb.name
+            const feature = geojsonFormat.readFeatures(
+              {
+                type: 'Feature',
+                geometry: geomToLoad,
+                properties: {
+                  type: 'existing_sub_block',
+                  id: sb.id,
+                  name: sb.name
+                }
+              },
+              imageUrl ? undefined : {
+                dataProjection: 'EPSG:4326',
+                featureProjection: 'EPSG:3857'
               }
-            });
+            );
             vectorSource.current.addFeatures(feature);
           } catch (e) {
             console.error("Failed to parse existing sub-block geom in editor", e);
@@ -247,15 +259,21 @@ export function SubBlockMapEditor({
               };
             }
             
-            const feature = geojsonFormat.readFeatures({
-              type: 'Feature',
-              geometry: geomToLoad,
-              properties: {
-                type: 'existing_embankment',
-                id: emb.id,
-                name: emb.name
+            const feature = geojsonFormat.readFeatures(
+              {
+                type: 'Feature',
+                geometry: geomToLoad,
+                properties: {
+                  type: 'existing_embankment',
+                  id: emb.id,
+                  name: emb.name
+                }
+              },
+              imageUrl ? undefined : {
+                dataProjection: 'EPSG:4326',
+                featureProjection: 'EPSG:3857'
               }
-            });
+            );
             vectorSource.current.addFeatures(feature);
           } catch (e) {
             console.error("Failed to parse existing embankment geom in editor", e);
@@ -488,7 +506,7 @@ export function SubBlockMapEditor({
       type: 'Point'
     });
     
-    draw.on('drawend', (event) => {
+    draw.on('drawend', async (event) => {
       const feature = event.feature;
       const coords = (feature.getGeometry() as any).getCoordinates();
 
@@ -504,7 +522,7 @@ export function SubBlockMapEditor({
       }
 
       if (!inside) {
-        alert('Perangkat harus ditempatkan di dalam polygon sub-block yang sedang dibuat/diedit!');
+        await dialog.alert('Perangkat harus ditempatkan di dalam polygon sub-block yang sedang dibuat/diedit!');
         vectorSource.current.removeFeature(feature);
         setIsDrawingPoint(false);
         setActiveDeviceId('');
@@ -542,10 +560,13 @@ export function SubBlockMapEditor({
     setIsDrawingPoint(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const features = vectorSource.current.getFeatures();
     const polygonFeature = features.find(f => f.getGeometry()?.getType() === 'Polygon');
-    if (!polygonFeature) return alert('Silakan gambar poligon terlebih dahulu');
+    if (!polygonFeature) {
+      await dialog.alert('Silakan gambar poligon terlebih dahulu');
+      return;
+    }
     
     const format = new GeoJSON();
     let geojson: any;
@@ -735,7 +756,7 @@ export function SubBlockMapEditor({
         {!field.mapVisualUrl && (
           <div className="absolute bottom-4 left-20 pointer-events-none flex items-center">
             <div className="bg-amber-500/10 border border-amber-500/20 backdrop-blur-md p-3 rounded-xl text-amber-600 max-w-sm text-center">
-              <p className="text-xs font-bold">Peringatan: Drone Imagery Belum Tersedia</p>
+              <p className="text-xs font-bold">Peringatan: Peta Lahan Belum Tersedia</p>
             </div>
           </div>
         )}

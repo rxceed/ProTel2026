@@ -36,6 +36,7 @@ import {
   UpdateEmbankmentSchema,
   ImportEmbankmentSchema,
 } from './master-data.schema';
+import { recalibrateFieldElevations } from '../telemetry/elevation-calibration';
 
 export const masterDataRouter = Router();
 
@@ -157,6 +158,17 @@ masterDataRouter.get(
   h(async (req, res) => {
     const rows = await subBlocksService.listByField(req.params['fieldId']!);
     res.json(successResponse(rows));
+  }),
+);
+
+// POST /fields/:fieldId/recalibrate-elevations — re-run subblocks elevation calibration
+masterDataRouter.post(
+  '/fields/:fieldId/recalibrate-elevations',
+  requireAuth,
+  requireFieldAccess('manager'),
+  h(async (req, res) => {
+    await recalibrateFieldElevations(req.params['fieldId']!);
+    res.json(successResponse({ message: 'Elevasi sub-blocks berhasil direkalibrasi' }));
   }),
 );
 

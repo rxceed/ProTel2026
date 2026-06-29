@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, MapPin, Loader2, AlertTriangle, Layers, Info, Pencil, Trash2, Fence } from 'lucide-react';
+import { Plus, Search, MapPin, Loader2, AlertTriangle, Layers, Info, Pencil, Trash2, Fence, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ import { CreateSubBlockModal } from './create-subblock-modal';
 import { CreateIrrigationPointModal } from './create-irrigation-point-modal';
 import { CreateSubBlockBorderModal } from './create-subblock-border-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -45,6 +46,7 @@ interface IrrigationPoint {
 }
 
 export function SubBlocksPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('');
   
@@ -52,6 +54,7 @@ export function SubBlocksPage() {
   const [irrigationPoints, setIrrigationPoints] = useState<IrrigationPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recalibrating, setRecalibrating] = useState(false);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSubBlock, setEditingSubBlock] = useState<SubBlock | null>(null);
@@ -131,32 +134,50 @@ export function SubBlocksPage() {
   }, [selectedFieldId]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus petak ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus petak ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/sub-blocks/${id}`);
       if (selectedFieldId) fetchSubBlocks(selectedFieldId);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus petak');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus petak');
+    }
+  };
+
+  const handleRecalibrate = async () => {
+    if (!selectedFieldId) return;
+    try {
+      setRecalibrating(true);
+      await apiClient.post(`/fields/${selectedFieldId}/recalibrate-elevations`);
+      await dialog.alert('Kalibrasi elevasi sub-block berhasil diperbarui!');
+      fetchSubBlocks(selectedFieldId);
+    } catch (err: any) {
+      console.error(err);
+      await dialog.alert(err.response?.data?.message || 'Gagal melakukan rekalibrasi elevasi');
+    } finally {
+      setRecalibrating(false);
     }
   };
 
   const handleDeletePoint = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus titik irigasi ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus titik irigasi ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/irrigation-points/${id}`);
       if (selectedFieldId) fetchIrrigationPoints(selectedFieldId);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus titik irigasi');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus titik irigasi');
     }
   };
 
   const handleDeleteEmbankment = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus pematang ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus pematang ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/embankments/${id}`);
       if (selectedFieldId) fetchEmbankments(selectedFieldId);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus pematang');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus pematang');
     }
   };
 
@@ -193,12 +214,26 @@ export function SubBlocksPage() {
         </div>
         <div className="flex gap-2">
           {activeTab === 'sub-blocks' && (
-            <Button
-              onClick={() => setIsModalOpen(true)}
-              disabled={!selectedFieldId}
-            >
-              <Plus className="mr-2 h-4 w-4" /> Tambah Sub-block
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleRecalibrate}
+                disabled={!selectedFieldId || recalibrating}
+              >
+                {recalibrating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Rekalibrasi Elevasi
+              </Button>
+              <Button
+                onClick={() => setIsModalOpen(true)}
+                disabled={!selectedFieldId}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Tambah Sub-block
+              </Button>
+            </>
           )}
           {activeTab === 'irrigation-points' && (
             <Button
@@ -443,8 +478,6 @@ export function SubBlocksPage() {
                     <tr>
                       <th className="px-6 py-3 font-medium">Nama Pematang</th>
                       <th className="px-6 py-3 font-medium">Kode</th>
-                      <th className="px-6 py-3 font-medium">Elevasi</th>
-                      <th className="px-6 py-3 font-medium">Tipe Tanah</th>
                       <th className="px-6 py-3 font-medium">Koneksi Sub-block</th>
                       <th className="px-6 py-3 font-medium text-right">Aksi</th>
                     </tr>
@@ -465,8 +498,6 @@ export function SubBlocksPage() {
                           )}
                         </td>
                         <td className="px-6 py-4 code font-mono text-xs">{emb.code || '-'}</td>
-                        <td className="px-6 py-4">{emb.elevationM || emb.elevation_m ? `${emb.elevationM || emb.elevation_m} m` : '-'}</td>
-                        <td className="px-6 py-4 capitalize">{emb.soilType || emb.soil_type || '-'}</td>
                         <td className="px-6 py-4 text-xs text-muted-foreground truncate max-w-xs" title={getConnectedSubBlockNames(emb.connectedSubBlocks || emb.connected_sub_blocks)}>
                           {getConnectedSubBlockNames(emb.connectedSubBlocks || emb.connected_sub_blocks)}
                         </td>

@@ -7,6 +7,7 @@ import { apiClient } from '@/api/client';
 import { CreateCycleModal } from './create-cycle-modal';
 import { AdvancePhaseModal } from './advance-phase-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field { id: string; name: string; }
 interface SubBlock { id: string; name: string; code: string | null; }
@@ -24,6 +25,7 @@ interface CropCycle {
 }
 
 export function CyclesPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState('');
   
@@ -102,13 +104,14 @@ export function CyclesPage() {
   const ongoingCycle = cycles.find(c => c.status === 'active');
 
   const handleDeleteCycle = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus data musim tanam ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus data musim tanam ini?');
+    if (!confirmed) return;
     try {
       setLoading(true);
       await apiClient.delete(`/crop-cycles/${id}`);
       fetchCycles();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus data');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus data');
     } finally {
       setLoading(false);
     }
@@ -234,13 +237,14 @@ export function CyclesPage() {
                     <Button 
                       className="w-full text-xs"
                       onClick={async () => {
-                        if (confirm('Panen sudah selesai?')) {
+                        const confirmed = await dialog.confirm('Panen sudah selesai?');
+                        if (confirmed) {
                           try {
                             setLoading(true);
                             await apiClient.post(`/crop-cycles/${ongoingCycle.id}/complete`);
                             fetchCycles();
                           } catch (err: any) {
-                            alert(err.response?.data?.message || 'Gagal memproses panen');
+                            await dialog.alert(err.response?.data?.message || 'Gagal memproses panen');
                           } finally {
                             setLoading(false);
                           }

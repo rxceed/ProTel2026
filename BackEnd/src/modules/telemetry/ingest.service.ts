@@ -16,6 +16,7 @@ import {
 } from '@/db/schema';
 import { logger } from '@/shared/utils/logger.util';
 import { normalizeReading, type CalibrationOffsets } from './normalizer';
+import { recalibrateFieldElevations } from './elevation-calibration';
 import type { BatchPayload } from './ingest.schema';
 
 // ---------------------------------------------------------------------------
@@ -276,23 +277,16 @@ export async function processBatch(payload: BatchPayload): Promise<BatchResult> 
             } else if (stationPoint && stationPoint.elevationM !== null) {
               refElevationM = parseFloat(stationPoint.elevationM.toString());
             }
-
             const elevationVal = 44330 * (1 - Math.pow(pressureVal / 1013.25, 0.1903));
             const calibrationOffset = elevationVal - refElevationM;
 
-            await db.update(subBlocksTable)
-              .set({
-                elevationCalibration: sql`COALESCE(${subBlocksTable.elevationM}, 0) + ${calibrationOffset.toFixed(2)}`,
-                updatedAt: new Date(),
-              })
-              .where(eq(subBlocksTable.fieldId, device.fieldId));
+            await recalibrateFieldElevations(device.fieldId, device.subBlockId, pressureVal);
 
             await db.update(irrigationPointsTable)
               .set({
                 callibratedElevation: sql`COALESCE(${irrigationPointsTable.elevationM}, 0) + ${calibrationOffset.toFixed(2)}`,
               })
-              .where(eq(irrigationPointsTable.fieldId, device.fieldId));
-          }
+              .where(eq(irrigationPointsTable.fieldId, device.fieldId));          }
         }
 
         processed++;

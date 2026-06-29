@@ -51,25 +51,25 @@ async function seed() {
     console.log('  → irrigation_rule_profiles...');
     await client.query(`
       INSERT INTO mst.irrigation_rule_profiles
-        (name, bucket_code, phase_code, awd_lower_threshold_cm, awd_upper_target_cm,
+        (name, bucket_code, phase_code, awd_upper_target_cm,
          min_saturation_days, drought_alert_cm, priority_weight, rain_delay_mm, target_confidence, is_default)
       VALUES
-        ('Early - Vegetatif Awal',          'early','vegetative_early', -15.0,  5.0, 2, -25.0, 1.00, 10.0, 'high',   TRUE),
-        ('Early - Vegetatif Lanjut',        'early','vegetative_late',  -15.0,  5.0, 2, -25.0, 1.00, 10.0, 'high',   TRUE),
-        ('Early - Reproduktif',             'early','reproductive',      -5.0, 10.0, 3, -12.0, 1.20,  5.0, 'high',   TRUE),
-        ('Early - Pemasakan',               'early','ripening',          -5.0,  5.0, 1, -10.0, 0.80, 15.0, 'medium', TRUE),
-        ('Medium Early - Vegetatif Awal',   'medium_early','vegetative_early', -18.0,  5.0, 2, -28.0, 1.00, 10.0, 'high',   TRUE),
-        ('Medium Early - Vegetatif Lanjut', 'medium_early','vegetative_late',  -18.0,  5.0, 2, -28.0, 1.00, 10.0, 'high',   TRUE),
-        ('Medium Early - Reproduktif',      'medium_early','reproductive',      -5.0, 10.0, 3, -13.0, 1.20,  5.0, 'high',   TRUE),
-        ('Medium Early - Pemasakan',        'medium_early','ripening',          -5.0,  5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE),
-        ('Medium - Vegetatif Awal',         'medium','vegetative_early', -20.0,  5.0, 2, -30.0, 1.00, 10.0, 'high',   TRUE),
-        ('Medium - Vegetatif Lanjut',       'medium','vegetative_late',  -20.0,  5.0, 2, -30.0, 1.00, 10.0, 'high',   TRUE),
-        ('Medium - Reproduktif',            'medium','reproductive',      -5.0, 10.0, 3, -15.0, 1.20,  5.0, 'high',   TRUE),
-        ('Medium - Pemasakan',              'medium','ripening',          -5.0,  5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE),
-        ('Late - Vegetatif Awal',           'late','vegetative_early', -20.0,  5.0, 3, -35.0, 1.00, 10.0, 'high',   TRUE),
-        ('Late - Vegetatif Lanjut',         'late','vegetative_late',  -20.0,  5.0, 3, -35.0, 1.00, 10.0, 'high',   TRUE),
-        ('Late - Reproduktif',              'late','reproductive',      -5.0, 10.0, 3, -15.0, 1.20,  5.0, 'high',   TRUE),
-        ('Late - Pemasakan',                'late','ripening',          -5.0,  5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE)
+        ('Early - Vegetatif Awal',          'early','vegetative_early', 5.0, 2, -25.0, 1.00, 10.0, 'high',   TRUE),
+        ('Early - Vegetatif Lanjut',        'early','vegetative_late',  5.0, 2, -25.0, 1.00, 10.0, 'high',   TRUE),
+        ('Early - Reproduktif',             'early','reproductive',     10.0, 3, -12.0, 1.20,  5.0, 'high',   TRUE),
+        ('Early - Pemasakan',               'early','ripening',         5.0, 1, -10.0, 0.80, 15.0, 'medium', TRUE),
+        ('Medium Early - Vegetatif Awal',   'medium_early','vegetative_early', 5.0, 2, -28.0, 1.00, 10.0, 'high',   TRUE),
+        ('Medium Early - Vegetatif Lanjut', 'medium_early','vegetative_late',  5.0, 2, -28.0, 1.00, 10.0, 'high',   TRUE),
+        ('Medium Early - Reproduktif',      'medium_early','reproductive',     10.0, 3, -13.0, 1.20,  5.0, 'high',   TRUE),
+        ('Medium Early - Pemasakan',        'medium_early','ripening',         5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE),
+        ('Medium - Vegetatif Awal',         'medium','vegetative_early', 5.0, 2, -30.0, 1.00, 10.0, 'high',   TRUE),
+        ('Medium - Vegetatif Lanjut',       'medium','vegetative_late',  5.0, 2, -30.0, 1.00, 10.0, 'high',   TRUE),
+        ('Medium - Reproduktif',            'medium','reproductive',     10.0, 3, -15.0, 1.20,  5.0, 'high',   TRUE),
+        ('Medium - Pemasakan',              'medium','ripening',         5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE),
+        ('Late - Vegetatif Awal',           'late','vegetative_early', 5.0, 3, -35.0, 1.00, 10.0, 'high',   TRUE),
+        ('Late - Vegetatif Lanjut',         'late','vegetative_late',  5.0, 3, -35.0, 1.00, 10.0, 'high',   TRUE),
+        ('Late - Reproduktif',              'late','reproductive',     10.0, 3, -15.0, 1.20,  5.0, 'high',   TRUE),
+        ('Late - Pemasakan',                'late','ripening',         5.0, 1, -12.0, 0.80, 15.0, 'medium', TRUE)
       ON CONFLICT DO NOTHING;
     `);
 

@@ -260,7 +260,6 @@ export const irrigationRuleProfiles = mst.table('irrigation_rule_profiles', {
   description:          text('description'),
   bucketCode:           text('bucket_code').notNull().references(() => riceDurationBuckets.bucketCode),
   phaseCode:            text('phase_code').notNull().references(() => growthPhases.phaseCode),
-  awdLowerThresholdCm:  numeric('awd_lower_threshold_cm', { precision: 6, scale: 2 }).notNull(),
   awdUpperTargetCm:     numeric('awd_upper_target_cm', { precision: 6, scale: 2 }).notNull(),
   droughtAlertCm:       numeric('drought_alert_cm', { precision: 6, scale: 2 }),
   minSaturationDays:    integer('min_saturation_days').notNull().default(1),

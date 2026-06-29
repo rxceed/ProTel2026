@@ -159,7 +159,6 @@ export const CreateRuleProfileSchema = z.object({
   description:             z.string().max(1000).optional(),
   bucket_code:             z.string().min(1),
   phase_code:              z.string().min(1),
-  awd_lower_threshold_cm:  z.coerce.number(),
   awd_upper_target_cm:     z.coerce.number(),
   drought_alert_cm:        z.coerce.number().optional(),
   min_saturation_days:     z.coerce.number().int().min(0).default(1),

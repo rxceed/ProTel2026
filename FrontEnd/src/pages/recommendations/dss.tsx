@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/client';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -64,6 +65,7 @@ interface ConfirmModalState {
 }
 
 export function DssPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('');
   
@@ -181,7 +183,7 @@ export function DssPage() {
       fetchDssData(selectedFieldId);
     } catch (err: any) {
       console.error('Failed to submit feedback', err);
-      alert(err.response?.data?.message || err.response?.data?.error || 'Gagal memperbarui status rekomendasi.');
+      await dialog.alert(err.response?.data?.message || err.response?.data?.error || 'Gagal memperbarui status rekomendasi.');
     } finally {
       setSubmittingConfirm(false);
     }
@@ -206,7 +208,7 @@ export function DssPage() {
       fetchDssData(selectedFieldId);
     } catch (err: any) {
       console.error('Failed to submit skip', err);
-      alert(err.response?.data?.message || err.response?.data?.error || 'Gagal memperbarui status rekomendasi.');
+      await dialog.alert(err.response?.data?.message || err.response?.data?.error || 'Gagal memperbarui status rekomendasi.');
     } finally {
       setSubmittingSkip(false);
     }
@@ -226,15 +228,18 @@ export function DssPage() {
   // ── Catat Obat/Pupuk ─────────────────────────────────────────────────────
 
   const handleSubmitTreatment = async () => {
-    if (!treatmentForm.productName) return alert('Nama obat/pupuk wajib diisi');
+    if (!treatmentForm.productName) {
+      await dialog.alert('Nama obat/pupuk wajib diisi');
+      return;
+    }
     try {
       await apiClient.post(`/fields/${selectedFieldId}/agronomic-treatments`, treatmentForm);
       setShowTreatmentModal(false);
-      alert('Perlakuan berhasil dicatat! Sistem DSS akan otomatis menyesuaikan target air sesuai durasi.');
+      await dialog.alert('Perlakuan berhasil dicatat! Sistem DSS akan otomatis menyesuaikan target air sesuai durasi.');
       fetchDssData(selectedFieldId);
     } catch (err: any) {
       console.error('Failed to submit treatment', err);
-      alert(err.response?.data?.message || err.response?.data?.error || 'Gagal mencatat perlakuan.');
+      await dialog.alert(err.response?.data?.message || err.response?.data?.error || 'Gagal mencatat perlakuan.');
     }
   };
 
@@ -261,7 +266,7 @@ export function DssPage() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Active Engine Outputs</h2>
           <p className="text-muted-foreground mt-1">
-            Memonitor rekomendasi irigasi dan sistem peringatan berbasis AI (Decision Support System).
+            Memonitor rekomendasi irigasi dan sistem peringatan Decision Support System).
           </p>
         </div>
       </div>

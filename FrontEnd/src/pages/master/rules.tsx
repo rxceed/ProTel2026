@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/client';
 import { CreateRuleModal } from './create-rule-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface RuleProfile {
   id: string;
@@ -13,7 +14,6 @@ interface RuleProfile {
   description: string;
   bucketCode: string;
   phaseCode: string;
-  awdLowerThresholdCm: number;
   awdUpperTargetCm: number;
   droughtAlertCm: number | null;
   rainDelayMm: number;
@@ -24,6 +24,7 @@ interface RuleProfile {
 }
 
 export function RulesPage() {
+  const dialog = useDialog();
   const [rules, setRules] = useState<RuleProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +37,10 @@ export function RulesPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await apiClient.get('/rule-profiles');
-      setRules(response.data.data);
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Gagal memuat aturan DSS');
+      const res = await apiClient.get('/rule-profiles');
+      setRules(res.data.data);
+    } catch {
+      setError('Gagal memuat aturan DSS');
     } finally {
       setLoading(false);
     }
@@ -55,12 +56,13 @@ export function RulesPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus profil aturan ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus profil aturan ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/rule-profiles/${id}`);
       fetchRules();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus aturan');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus aturan');
     }
   };
 
@@ -70,7 +72,7 @@ export function RulesPage() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight">DSS Rule Profiles</h2>
           <p className="text-muted-foreground mt-1">
-            Konfigurasi batas air, aturan fase, dan toleransi cuaca untuk sistem Irigasi Presisi AI.
+            Konfigurasi batas air, aturan fase, dan toleransi cuaca untuk sistem Irigasi Presisi.
           </p>
         </div>
         <div className="flex gap-2">
@@ -135,8 +137,8 @@ export function RulesPage() {
                   <tr>
                     <th className="px-6 py-3 font-medium">Nama Aturan</th>
                     <th className="px-6 py-3 font-medium">Fase Tanam</th>
-                    <th className="px-6 py-3 font-medium text-right">Batas Bawah AWD</th>
                     <th className="px-6 py-3 font-medium text-right">Target Genangan</th>
+                    <th className="px-6 py-3 font-medium text-right">Drought Alert</th>
                     <th className="px-6 py-3 font-medium text-center">Status</th>
                     <th className="px-6 py-3 font-medium text-right">Aksi</th>
                   </tr>
@@ -151,8 +153,10 @@ export function RulesPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 capitalize">{rule.phaseCode.replace('_', ' ')}</td>
-                      <td className="px-6 py-4 text-right font-mono text-red-500">{rule.awdLowerThresholdCm} cm</td>
                       <td className="px-6 py-4 text-right font-mono text-blue-500">{rule.awdUpperTargetCm} cm</td>
+                      <td className="px-6 py-4 text-right font-mono text-amber-500">
+                        {rule.droughtAlertCm !== null && rule.droughtAlertCm !== undefined ? `${rule.droughtAlertCm} cm` : `${rule.awdUpperTargetCm - 10} cm`}
+                      </td>
                       <td className="px-6 py-4 text-center">
                         <Badge variant={rule.isActive ? "default" : "secondary"}>
                           {rule.isActive ? 'Aktif' : 'Non-aktif'}

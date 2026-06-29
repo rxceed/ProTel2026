@@ -21,6 +21,7 @@ import { apiClient, gisProcClient } from '@/api/client';
 import axios from 'axios';
 import { getCachedMapImageUrl, clearMapCache } from '@/lib/mapCache';
 import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, GitMerge, ArrowRight, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -52,7 +53,6 @@ interface RuleProfile {
   description: string;
   bucketCode: string;
   phaseCode: string;
-  awdLowerThresholdCm: number;
   awdUpperTargetCm: number;
   droughtAlertCm: number | null;
   rainDelayMm: number;
@@ -81,6 +81,7 @@ interface IrrigationPoint {
   pointType: 'source' | 'drain';
   coordinatePoint: any;
   elevationM: string | null;
+  callibratedElevation?: string | number | null;
   name?: string | null;
   assignedSubBlocks?: string[] | null;
 }
@@ -232,6 +233,8 @@ function IrrigationRouteGraph({
       isIrrigationPoint: true,
     }))
   ];
+
+  const sourcePoints = irrigationPoints.filter(ip => ip.pointType === 'source');
 
   if (routes.length === 0) {
     return (
@@ -564,26 +567,31 @@ function IrrigationRouteGraph({
       </div>
 
       {/* Source selector */}
-      <div className="bg-muted/40 p-4 rounded-xl border border-muted/50">
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Sumber Air</label>
-          <select
-            value={sourceIndex}
-            onChange={(e) => setSourceIndex(parseInt(e.target.value))}
-            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 focus:ring-2 focus:ring-primary focus:border-primary cursor-pointer text-slate-900 dark:text-slate-100 font-semibold outline-none shadow-sm"
-          >
-            {allNodes.map((node, idx) => (
-              <option
-                key={(node as any).id}
-                value={idx}
-                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-medium"
-              >
-                {idx + 1}. {(node as any).name}
-              </option>
-            ))}
-          </select>
+      {sourcePoints.length > 1 && (
+        <div className="bg-muted/40 p-4 rounded-xl border border-muted/50">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Sumber Air</label>
+            <select
+              value={sourceIndex}
+              onChange={(e) => setSourceIndex(parseInt(e.target.value))}
+              className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 focus:ring-2 focus:ring-primary focus:border-primary cursor-pointer text-slate-900 dark:text-slate-100 font-semibold outline-none shadow-sm"
+            >
+              {sourcePoints.map((node) => {
+                const idx = allNodes.findIndex((n) => n.id === node.id);
+                return (
+                  <option
+                    key={node.id}
+                    value={idx}
+                    className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-medium"
+                  >
+                    {node.name || 'SUMBER'}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Geo-based water flow SVG — interactive pan/zoom */}
       <div className="relative bg-sky-950/10 dark:bg-sky-950/30 border border-sky-400/20 rounded-xl overflow-hidden select-none">
@@ -988,6 +996,7 @@ function IrrigationRouteGraph({
 }
 
 export function MapPage() {
+  const dialog = useDialog();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
@@ -1185,7 +1194,14 @@ export function MapPage() {
   // Reset source in bounds when subBlocks or irrigationPoints change
   useEffect(() => {
     if (subBlocks.length > 0 || irrigationPoints.length > 0) {
-      setSourceIndex(0);
+      const defaultSourceIdx = (() => {
+        const irrSourceIdx = irrigationPoints.findIndex(ip => ip.pointType === 'source');
+        if (irrSourceIdx !== -1) {
+          return subBlocks.length + irrSourceIdx;
+        }
+        return 0;
+      })();
+      setSourceIndex(defaultSourceIdx);
     }
   }, [subBlocks, irrigationPoints]);
 
@@ -1218,7 +1234,7 @@ export function MapPage() {
           name: ip.name || (ip.pointType === 'source' ? 'SUMBER' : 'BUANG'),
           pointType: ip.pointType,
           coordinatePoint: ip.coordinatePoint,
-          elevationM: ip.elevationM,
+          elevationM: ip.callibratedElevation !== null && ip.callibratedElevation !== undefined ? String(ip.callibratedElevation) : ip.elevationM,
           isIrrigationPoint: true,
           areaM2: 0.0001,
         }))
@@ -1340,10 +1356,10 @@ export function MapPage() {
       // Fetch the matrix visualization result
       await fetchMatrixResult();
       
-      alert('Floyd-Warshall routing run successfully and result saved to database!');
+      await dialog.alert('Floyd-Warshall routing run successfully and result saved to database!');
     } catch (err) {
       console.error('Failed to run Floyd-Warshall routing', err);
-      alert('Gagal menjalankan Floyd-Warshall routing: ' + (err instanceof Error ? err.message : String(err)));
+      await dialog.alert('Gagal menjalankan kalkulasi rute irigasi: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setRunningFloydWarshall(false);
     }
@@ -2276,12 +2292,13 @@ export function MapPage() {
                   variant="outline" 
                   className="w-full text-xs"
                   onClick={async () => {
-                    if (confirm('Laporkan pematang untuk kotak ini telah diperbaiki?')) {
+                    const confirmed = await dialog.confirm('Laporkan pematang untuk kotak ini telah diperbaiki?');
+                    if (confirmed) {
                       try {
                         await apiClient.post(`/sub-blocks/${selectedSubBlock.id}/resolve-embankment`);
-                        alert('Status darurat dicabut');
+                        await dialog.alert('Status darurat dicabut');
                       } catch (e) {
-                        alert('Gagal mencabut status darurat');
+                        await dialog.alert('Gagal mencabut status darurat');
                       }
                     }
                   }}
@@ -3039,10 +3056,6 @@ export function MapPage() {
             {resolvedRuleProfile && (
               <div className="flex flex-wrap gap-3 items-center sm:border-l sm:pl-4">
                 <div className="text-center">
-                  <p className="text-[10px] uppercase font-semibold text-muted-foreground">Batas Bawah AWD</p>
-                  <p className="text-sm font-bold text-red-500">{resolvedRuleProfile.awdLowerThresholdCm} cm</p>
-                </div>
-                <div className="text-center">
                   <p className="text-[10px] uppercase font-semibold text-muted-foreground">Target Genangan</p>
                   <p className="text-sm font-bold text-blue-500">{resolvedRuleProfile.awdUpperTargetCm} cm</p>
                 </div>
@@ -3112,9 +3125,9 @@ export function MapPage() {
                           {(() => {
                             if (sb.elevationCalibration !== null && sb.elevationCalibration !== undefined) {
                               const cal = parseFloat(sb.elevationCalibration.toString());
-                              return `${cal.toFixed(2)} m`;
+                              return `${cal.toFixed(2)} mdpl`;
                             }
-                            return sb.elevationM ? `${parseFloat(sb.elevationM).toFixed(2)} m` : '—';
+                            return sb.elevationM ? `${parseFloat(sb.elevationM).toFixed(2)} m relatif` : '—';
                           })()}
                         </span>
                       </div>
@@ -3183,7 +3196,14 @@ export function MapPage() {
                       <div className="space-y-1.5 text-xs text-muted-foreground">
                         <div className="flex justify-between">
                           <span>Elevasi</span>
-                          <span className="font-semibold text-foreground">{ip.elevationM ? `${ip.elevationM} m` : '—'}</span>
+                          <span className="font-semibold text-foreground">
+                            {(() => {
+                              const elev = ip.callibratedElevation !== null && ip.callibratedElevation !== undefined
+                                ? ip.callibratedElevation
+                                : ip.elevationM;
+                              return elev ? `${elev} mdpl` : '—';
+                            })()}
+                          </span>
                         </div>
                         <div className="flex flex-col gap-1">
                           <span>Terhubung ke Sub-blok:</span>
@@ -3272,7 +3292,7 @@ export function MapPage() {
                 ) : (
                   <>
                     <Activity className="h-3.5 w-3.5" />
-                    Jalankan Floyd-Warshall
+                    Kalkulasi Rute Irigasi
                   </>
                 )}
               </Button>

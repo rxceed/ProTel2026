@@ -33,43 +33,113 @@
     {
       "idx": 4,
       "version": "7",
+      "when": 1781200000000,
+      "tag": "0003_update_device_topic_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
       "when": 1781817600000,
       "tag": "0004_fix_state_tables",
       "breakpoints": true
     },
     {
-      "idx": 5,
+      "idx": 6,
+      "version": "7",
+      "when": 1781818600000,
+      "tag": "0004_irrigation_points_flow_paths_alter",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781819600000,
+      "tag": "0005_add_irrigation_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
       "version": "7",
       "when": 1781820000000,
       "tag": "0005_sensor_max_distance",
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 9,
+      "version": "7",
+      "when": 1781820030000,
+      "tag": "0006_add_field_id_to_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
       "version": "7",
       "when": 1781820060000,
       "tag": "0006_routing_enrichment",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 11,
       "version": "7",
-      "when": 1781890690198,
-      "tag": "0007_add_bmkg_flags",
+      "when": 1781820100000,
+      "tag": "0007_add_embankments",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 12,
       "version": "7",
-      "when": 1781901541389,
-      "tag": "0008_tricky_nico_minoru",
+      "when": 1781820200000,
+      "tag": "0008_embankments_connected_sub_blocks",
       "breakpoints": true
     },
     {
-      "idx": 9,
+      "idx": 13,
       "version": "7",
-      "when": 1781901562148,
-      "tag": "0009_left_darwin",
+      "when": 1781820300000,
+      "tag": "0009_update_device_topic_naming",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781820400000,
+      "tag": "0010_add_irrigation_points_name_assigned_sub_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1781820500000,
+      "tag": "0011_add_elevation_calibration_and_pressure",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781820600000,
+      "tag": "0012_update_device_topic_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781820700000,
+      "tag": "0013_add_parent_station_to_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781820800000,
+      "tag": "0014_update_device_type_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782569302688,
+      "tag": "0019_mixed_thaddeus_ross",
       "breakpoints": true
     },
     {
@@ -91,6 +161,34 @@
       "version": "7",
       "when": 1782150071631,
       "tag": "0012_aromatic_fallen_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782576193000,
+      "tag": "0020_add_is_source_depleted_to_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782576194000,
+      "tag": "0021_add_map_headers_to_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782576195000,
+      "tag": "0022_remove_awd_lower_threshold_from_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782576196000,
+      "tag": "0023_agronomic_obat",
       "breakpoints": true
     }
   ]
